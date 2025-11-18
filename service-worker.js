@@ -1,4 +1,4 @@
-const CACHE_NAME = 'docusearch-v18'; // CHANGED TO v15
+const CACHE_NAME = 'docusearch-v19'; // CHANGED TO v15
 const ASSETS = [
   './',
   './index.html',
