@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>DocuSearch</title>
+    <title>DocuSearch Pro</title>
     
     <!-- PWA Setup -->
     <link rel="manifest" href="./manifest.json" />
@@ -12,146 +12,137 @@
     <meta name="theme-color" content="#4f46e5">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3143/3143460.png">
 
-    <!-- React & Tailwind (Loaded from CDN for GitHub Pages) -->
+    <!-- LIBRARIES -->
+    <!-- React -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Icons -->
+    <!-- Fuse.js (Fuzzy Search) -->
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
+    <!-- Tesseract.js (OCR) -->
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js'></script>
+    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <style>
-      /* iOS Safe Area fixes */
       .pt-safe-top { padding-top: env(safe-area-inset-top); }
       .pb-safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
-      /* Hide scrollbar */
       .scrollbar-hide::-webkit-scrollbar { display: none; }
       .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+      /* Custom Grid for Thumbnails */
+      .grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 0.75rem; }
     </style>
   </head>
   <body class="bg-slate-50 text-slate-900 select-none">
     <div id="root"></div>
 
-    <!-- THE APP LOGIC -->
     <script type="text/babel">
-      const { useState, useEffect, useRef } = React;
+      const { useState, useEffect, useRef, useMemo } = React;
       const { createRoot } = ReactDOM;
       
-      // Icon components (Using SVG paths for stability without build steps)
+      // --- ICON COMPONENT ---
       const Icon = ({ path, size = 20, className = "" }) => (
-        <svg 
-          xmlns="http://www.w3.org/2000/svg" 
-          width={size} height={size} 
-          viewBox="0 0 24 24" 
-          fill="none" stroke="currentColor" 
-          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
-          className={className}
-          dangerouslySetInnerHTML={{ __html: path }}
-        />
+        <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" 
+          fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
+          className={className} dangerouslySetInnerHTML={{ __html: path }} />
       );
-
-      // Icons Paths
+      
       const ICONS = {
         search: '<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>',
-        file: '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline>',
         upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>',
         arrowLeft: '<line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>',
-        book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>',
         trash: '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>',
-        download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line>'
+        grid: '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>',
+        list: '<line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line>',
+        tag: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line>',
+        scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>',
+        download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line>',
+        settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'
       };
 
-      // Config
-      const DB_NAME = 'DocuSearch_DB_V1';
+      // CONFIG
+      const DB_NAME = 'DocuSearch_Pro_V1';
       const STORE_NAME = 'files_store';
       const PDFJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
       const PDFJS_WORKER_CDN = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
       function App() {
-        const [pdfLibReady, setPdfLibReady] = useState(false);
+        // STATE
         const [files, setFiles] = useState([]); 
+        const [viewMode, setViewMode] = useState('list'); // 'list' or 'grid'
         const [searchQuery, setSearchQuery] = useState('');
         const [searchResults, setSearchResults] = useState([]);
         const [selectedFile, setSelectedFile] = useState(null);
-        const [indexingProgress, setIndexingProgress] = useState({ current: 0, total: 0, filename: '' });
+        const [progress, setProgress] = useState({ current: 0, total: 0, label: '' });
         const [isViewerOpen, setIsViewerOpen] = useState(false);
-        const [deferredPrompt, setDeferredPrompt] = useState(null);
+        const [showSettings, setShowSettings] = useState(false);
+        const [activeTagFilter, setActiveTagFilter] = useState(null);
         const [showReuploadModal, setShowReuploadModal] = useState(false);
         const [pendingViewFile, setPendingViewFile] = useState(null);
 
         const fileInputRef = useRef(null);
         const reuploadInputRef = useRef(null);
+        const importInputRef = useRef(null);
 
+        // INITIALIZE
         useEffect(() => {
           const script = document.createElement('script');
           script.src = PDFJS_CDN;
           script.onload = () => {
             window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN;
-            setPdfLibReady(true);
           };
           document.body.appendChild(script);
-
           loadLibraryFromDB();
-          
-          window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            setDeferredPrompt(e);
-          });
-
-          // Register Service Worker
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./service-worker.js');
-          }
         }, []);
 
-        // --- DB Logic ---
-        const openDB = () => {
-          return new Promise((resolve, reject) => {
-            const request = indexedDB.open(DB_NAME, 1);
-            request.onupgradeneeded = (e) => {
-              const db = e.target.result;
-              if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-            };
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-          });
-        };
+        // --- DB FUNCTIONS ---
+        const openDB = () => new Promise((resolve, reject) => {
+          const r = indexedDB.open(DB_NAME, 2); // Version 2 for schema updates
+          r.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          };
+          r.onsuccess = () => resolve(r.result);
+          r.onerror = () => reject(r.error);
+        });
 
         const loadLibraryFromDB = async () => {
           try {
             const db = await openDB();
             const tx = db.transaction(STORE_NAME, 'readonly');
             const req = tx.objectStore(STORE_NAME).getAll();
-            req.onsuccess = () => {
-              setFiles(req.result.map(f => ({ ...f, url: null, status: 'ready' })));
-            };
-          } catch (e) {}
+            req.onsuccess = () => setFiles(req.result.map(f => ({ ...f, url: null, status: 'ready' })));
+          } catch(e) { console.error(e); }
         };
 
         const saveFileToDB = async (fileData) => {
-          try {
-            const db = await openDB();
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            const { url, fileObj, ...data } = fileData; 
-            tx.objectStore(STORE_NAME).put(data);
-          } catch (e) {}
-        };
-
-        const clearLibrary = async () => {
-          if(!confirm("Delete all indexed files?")) return;
           const db = await openDB();
           const tx = db.transaction(STORE_NAME, 'readwrite');
-          tx.objectStore(STORE_NAME).clear();
-          setFiles([]);
-          setSearchResults([]);
+          const { url, fileObj, ...data } = fileData; 
+          tx.objectStore(STORE_NAME).put(data);
         };
 
-        // --- File Logic ---
+        const updateFileInDB = async (fileId, updates) => {
+          const db = await openDB();
+          const tx = db.transaction(STORE_NAME, 'readwrite');
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.get(fileId);
+          req.onsuccess = () => {
+            const data = req.result;
+            const newData = { ...data, ...updates };
+            store.put(newData);
+            setFiles(prev => prev.map(f => f.id === fileId ? { ...f, ...updates } : f));
+            if (selectedFile?.id === fileId) setSelectedFile(prev => ({...prev, ...updates}));
+          };
+        };
+
+        // --- INDEXING ---
         const handleFileSelect = async (e) => {
-          if (!pdfLibReady) return alert("App initializing...");
+          if (!window.pdfjsLib) return alert("Initializing...");
           const fileList = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
-          if (fileList.length === 0) return;
+          if (!fileList.length) return;
 
           const newFiles = fileList.map(f => ({
             id: `${f.name}-${f.size}`,
@@ -159,58 +150,191 @@
             url: URL.createObjectURL(f),
             fileObj: f,
             textContent: [],
+            tags: [],
+            thumbnail: null,
             status: 'pending',
             pageCount: 0
           }));
 
-          const unique = newFiles.filter(n => !files.some(existing => existing.id === n.id));
+          // Filter duplicates
+          const unique = newFiles.filter(n => !files.some(ex => ex.id === n.id));
           setFiles(prev => [...prev, ...unique]);
-          
+
+          // Process
           for (const fileData of unique) {
             setFiles(prev => prev.map(f => f.id === fileData.id ? { ...f, status: 'indexing' } : f));
             try {
               const loadingTask = window.pdfjsLib.getDocument(fileData.url);
               const pdf = await loadingTask.promise;
-              const extractedText = [];
               
+              // 1. Generate Thumbnail (Page 1)
+              let thumbData = null;
+              try {
+                const page1 = await pdf.getPage(1);
+                const viewport = page1.getViewport({ scale: 0.5 }); // Low res for icon
+                const canvas = document.createElement('canvas');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                await page1.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+                thumbData = canvas.toDataURL('image/jpeg', 0.7);
+              } catch(err) { console.warn("Thumb failed", err); }
+
+              // 2. Extract Text
+              const extractedText = [];
               for (let i = 1; i <= pdf.numPages; i++) {
-                setIndexingProgress({ current: i, total: pdf.numPages, filename: fileData.name });
+                setProgress({ current: i, total: pdf.numPages, label: `Indexing ${fileData.name}` });
                 const page = await pdf.getPage(i);
-                const textContent = await page.getTextContent();
-                extractedText.push(textContent.items.map(item => item.str).join(' '));
+                const content = await page.getTextContent();
+                extractedText.push(content.items.map(item => item.str).join(' '));
               }
 
-              const completed = { ...fileData, status: 'ready', pageCount: pdf.numPages, textContent: extractedText };
+              const completed = { 
+                ...fileData, 
+                status: 'ready', 
+                pageCount: pdf.numPages, 
+                textContent: extractedText, 
+                thumbnail: thumbData 
+              };
+              
               setFiles(prev => prev.map(f => f.id === fileData.id ? completed : f));
               saveFileToDB(completed);
+
             } catch (err) {
+              console.error(err);
               setFiles(prev => prev.map(f => f.id === fileData.id ? { ...f, status: 'error' } : f));
             }
           }
-          setIndexingProgress({ current: 0, total: 0, filename: '' });
+          setProgress({ current: 0, total: 0, label: '' });
         };
 
-        // --- Search Logic ---
+        // --- FUZZY SEARCH (Fuse.js) ---
         useEffect(() => {
           if (!searchQuery.trim()) { setSearchResults([]); return; }
-          const q = searchQuery.toLowerCase();
-          const results = [];
-          files.forEach(f => {
-            f.textContent.forEach((text, idx) => {
-              if (text.toLowerCase().includes(q)) {
-                const i = text.toLowerCase().indexOf(q);
-                results.push({
-                  fileId: f.id, fileName: f.name, page: idx + 1,
-                  snippet: text.substring(Math.max(0, i - 30), Math.min(text.length, i + 30 + q.length)),
-                  online: !!f.url
-                });
+          
+          const fuse = new Fuse(files, {
+            keys: ['name', 'textContent', 'tags'],
+            threshold: 0.3, // 0.0 = exact, 1.0 = match anything. 0.3 allows typos.
+            includeMatches: true,
+            minMatchCharLength: 3
+          });
+
+          const results = fuse.search(searchQuery).map(res => {
+            // Find best snippet
+            const item = res.item;
+            let snippet = "";
+            let page = 1;
+            
+            // Check text matches
+            item.textContent.forEach((text, idx) => {
+              if (text.toLowerCase().includes(searchQuery.toLowerCase())) {
+                const i = text.toLowerCase().indexOf(searchQuery.toLowerCase());
+                snippet = text.substring(Math.max(0, i - 30), Math.min(text.length, i + 50));
+                page = idx + 1;
               }
             });
+
+            // Fallback if matched by Name or Tag
+            if (!snippet) snippet = "Matched by filename or tag";
+
+            return { 
+              fileId: item.id, 
+              fileName: item.name, 
+              page, 
+              snippet, 
+              online: !!item.url,
+              thumbnail: item.thumbnail 
+            };
           });
+          
           setSearchResults(results);
         }, [searchQuery, files]);
 
-        const handleView = (fileId, page) => {
+        // --- TAGGING ---
+        const addTag = (tag) => {
+          if (!tag || !selectedFile) return;
+          const newTags = [...(selectedFile.tags || []), tag];
+          // Remove dupes
+          const uniqueTags = [...new Set(newTags)];
+          updateFileInDB(selectedFile.id, { tags: uniqueTags });
+        };
+
+        const removeTag = (tag) => {
+          if (!selectedFile) return;
+          const newTags = selectedFile.tags.filter(t => t !== tag);
+          updateFileInDB(selectedFile.id, { tags: newTags });
+        };
+
+        const allTags = useMemo(() => {
+          const s = new Set();
+          files.forEach(f => f.tags?.forEach(t => s.add(t)));
+          return Array.from(s);
+        }, [files]);
+
+        // --- OCR (Tesseract) ---
+        const performOCR = async () => {
+          if (!selectedFile || !selectedFile.url) return alert("File must be loaded to scan.");
+          if (!confirm("This will scan the current page for text. It may take a few seconds.")) return;
+          
+          setProgress({ current: 1, total: 1, label: "Initializing OCR Engine..." });
+          
+          try {
+             const loadingTask = window.pdfjsLib.getDocument(selectedFile.url);
+             const pdf = await loadingTask.promise;
+             const page = await pdf.getPage(selectedFile.page || 1);
+             const viewport = page.getViewport({ scale: 1.5 });
+             const canvas = document.createElement('canvas');
+             canvas.width = viewport.width;
+             canvas.height = viewport.height;
+             await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+             
+             setProgress({ current: 1, total: 1, label: "Reading Text..." });
+             const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
+             
+             alert("OCR Complete! Found: " + text.substring(0, 50) + "...");
+             
+             // Update DB with new text
+             const newContent = [...selectedFile.textContent];
+             newContent[(selectedFile.page || 1) - 1] += " " + text; // Append
+             updateFileInDB(selectedFile.id, { textContent: newContent });
+             
+          } catch (err) {
+            alert("OCR Failed: " + err.message);
+          }
+          setProgress({ current: 0, total: 0, label: '' });
+        };
+
+        // --- BACKUP / EXPORT ---
+        const exportData = () => {
+          const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(files));
+          const a = document.createElement('a');
+          a.href = dataStr;
+          a.download = "docusearch_backup.json";
+          a.click();
+        };
+
+        const importData = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = async (ev) => {
+            try {
+              const imported = JSON.parse(ev.target.result);
+              // Sanitize status
+              const sanitized = imported.map(f => ({ ...f, url: null, status: 'ready' }));
+              
+              const db = await openDB();
+              const tx = db.transaction(STORE_NAME, 'readwrite');
+              sanitized.forEach(f => tx.objectStore(STORE_NAME).put(f));
+              setFiles(sanitized);
+              alert("Library restored!");
+              setShowSettings(false);
+            } catch(err) { alert("Invalid backup file"); }
+          };
+          reader.readAsText(file);
+        };
+
+        // --- VIEW LOGIC ---
+        const handleView = (fileId, page = 1) => {
           const file = files.find(f => f.id === fileId);
           if (file.url) {
             setSelectedFile({ ...file, page });
@@ -229,116 +353,171 @@
             setSelectedFile({ ...pendingViewFile, url, page: pendingViewFile.targetPage });
             setIsViewerOpen(true);
             setShowReuploadModal(false);
-          } else {
-            alert("Incorrect file selected.");
-          }
+          } else { alert("Incorrect file"); }
         };
 
-        const installApp = () => {
-          if (deferredPrompt) {
-            deferredPrompt.prompt();
-            deferredPrompt.userChoice.then((choice) => {
-              if (choice.outcome === 'accepted') setDeferredPrompt(null);
-            });
-          } else {
-            alert("To install on iOS: Tap 'Share' -> 'Add to Home Screen'");
-          }
-        };
+        const filteredFiles = files.filter(f => activeTagFilter ? f.tags?.includes(activeTagFilter) : true);
 
         return (
           <div className="flex flex-col h-[100dvh] bg-slate-50 text-slate-900 overflow-hidden font-sans">
-            {/* Header */}
+            
+            {/* --- HEADER --- */}
             <div className="pt-safe-top bg-white border-b border-slate-200 pb-2 px-4 flex items-end justify-between shadow-sm z-20">
               <div className="flex items-center gap-2 mt-3">
-                <div className="bg-indigo-600 p-1.5 rounded-lg text-white">
-                  <Icon path={ICONS.book} />
-                </div>
+                <div className="bg-indigo-600 p-1.5 rounded-lg text-white"><Icon path={ICONS.settings} size={20} onClick={() => setShowSettings(!showSettings)} className="cursor-pointer" /></div>
                 <div>
-                  <h1 className="font-bold text-lg leading-none">DocuSearch</h1>
-                  <p className="text-[10px] text-slate-400">Offline Library</p>
+                  <h1 className="font-bold text-lg leading-none">DocuSearch <span className="text-indigo-600">Pro</span></h1>
                 </div>
               </div>
-              <div className="flex gap-2">
-                {deferredPrompt && (
-                  <button onClick={installApp} className="bg-slate-900 text-white text-xs px-3 py-1.5 rounded-full font-medium flex items-center gap-1">
-                    <Icon path={ICONS.download} size={12} /> Install
-                  </button>
-                )}
-                <button onClick={clearLibrary} className="text-slate-400 p-2 hover:text-red-500"><Icon path={ICONS.trash} size={18} /></button>
+              <div className="flex gap-3">
+                <button onClick={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')} className="text-slate-500 p-1">
+                  <Icon path={viewMode === 'list' ? ICONS.grid : ICONS.list} />
+                </button>
               </div>
             </div>
 
+            {/* --- SETTINGS DRAWER --- */}
+            {showSettings && (
+              <div className="bg-slate-800 text-white p-4 space-y-4 animate-in slide-in-from-top-10 absolute top-16 left-0 right-0 z-40 shadow-xl">
+                <h3 className="font-bold text-sm uppercase text-slate-400">Data Management</h3>
+                <button onClick={exportData} className="flex items-center gap-2 w-full p-3 bg-slate-700 rounded-lg">
+                  <Icon path={ICONS.download} /> Backup Library (Export)
+                </button>
+                <button onClick={() => importInputRef.current.click()} className="flex items-center gap-2 w-full p-3 bg-slate-700 rounded-lg">
+                  <Icon path={ICONS.upload} /> Restore Library (Import)
+                </button>
+                <button onClick={() => { if(confirm("Delete all?")) { 
+                    indexedDB.deleteDatabase(DB_NAME); location.reload(); 
+                  }}} className="flex items-center gap-2 w-full p-3 bg-red-900 text-red-100 rounded-lg">
+                  <Icon path={ICONS.trash} /> Reset Everything
+                </button>
+                <input type="file" ref={importInputRef} className="hidden" onChange={importData} accept=".json" />
+              </div>
+            )}
+
+            {/* --- MAIN --- */}
             <div className="flex-1 overflow-hidden relative flex flex-col md:flex-row">
-              {/* Library */}
-              <div className={`flex-1 flex flex-col bg-slate-50 transition-transform duration-300 ${isViewerOpen ? '-translate-x-1/3 opacity-50' : ''}`}>
-                <div className="p-4 space-y-3">
+              <div className={`flex-1 flex flex-col min-h-0 bg-slate-50 transition-transform duration-300 ${isViewerOpen ? '-translate-x-1/3 opacity-50 pointer-events-none' : ''}`}>
+                
+                {/* SEARCH & TAGS */}
+                <div className="p-4 space-y-3 bg-white border-b border-slate-100">
                   <div className="relative">
                     <div className="absolute left-3 top-3 text-slate-400"><Icon path={ICONS.search} size={16} /></div>
                     <input 
-                      type="text" placeholder="Search indexed files..." 
-                      className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                      type="text" placeholder="Search text, tags, names..." 
+                      className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                     />
                   </div>
-                  <button onClick={() => fileInputRef.current.click()} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 active:scale-95 transition-transform flex justify-center gap-2 items-center">
-                    <Icon path={ICONS.upload} size={18} /> Add Documents
+                  
+                  {/* Tag Cloud */}
+                  {allTags.length > 0 && (
+                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                      <button onClick={() => setActiveTagFilter(null)} className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${!activeTagFilter ? 'bg-slate-800 text-white' : 'bg-slate-200 text-slate-600'}`}>All</button>
+                      {allTags.map(t => (
+                        <button key={t} onClick={() => setActiveTagFilter(t === activeTagFilter ? null : t)} className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${activeTagFilter === t ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
+                          #{t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <button onClick={() => fileInputRef.current.click()} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 active:scale-95 transition-transform flex justify-center gap-2">
+                    <Icon path={ICONS.upload} size={18} /> Add PDFs
                   </button>
                   <input type="file" ref={fileInputRef} multiple accept=".pdf" className="hidden" onChange={handleFileSelect} />
                   
-                  {indexingProgress.total > 0 && (
-                    <div className="bg-indigo-50 p-2 rounded-lg border border-indigo-100 flex items-center justify-between text-xs text-indigo-700">
-                      <span>Indexing: {indexingProgress.filename}</span>
-                      <span>{Math.round((indexingProgress.current/indexingProgress.total)*100)}%</span>
+                  {progress.total > 0 && (
+                    <div className="bg-indigo-50 p-2 rounded-lg border border-indigo-100 text-xs text-indigo-700 flex justify-between">
+                      <span>{progress.label}</span>
+                      <span>{Math.round((progress.current/progress.total)*100)}%</span>
                     </div>
                   )}
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-4 pb-20 scrollbar-hide">
+                {/* LIBRARY CONTENT */}
+                <div className="flex-1 overflow-y-auto p-4 pb-20">
                   {searchQuery ? (
-                    <div className="space-y-2">
-                      <h3 className="text-xs font-bold text-slate-400 uppercase">Matches ({searchResults.length})</h3>
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase">Results ({searchResults.length})</h3>
                       {searchResults.map((r, i) => (
-                        <div key={i} onClick={() => handleView(r.fileId, r.page)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm active:bg-slate-50">
-                          <div className="flex justify-between mb-1">
-                            <span className="font-bold text-sm truncate w-3/4">{r.fileName}</span>
-                            <span className="text-xs bg-slate-100 px-1.5 rounded">Pg {r.page}</span>
+                        <div key={i} onClick={() => handleView(r.fileId, r.page)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm active:bg-slate-50 flex gap-3">
+                          {r.thumbnail && <img src={r.thumbnail} className="w-12 h-16 object-cover rounded border border-slate-100 bg-slate-100" />}
+                          <div className="flex-1 overflow-hidden">
+                            <div className="flex justify-between mb-1">
+                              <span className="font-bold text-sm truncate">{r.fileName}</span>
+                              <span className="text-xs bg-indigo-50 text-indigo-600 px-1.5 rounded">Pg {r.page}</span>
+                            </div>
+                            <p className="text-xs text-slate-500 italic line-clamp-2">"{r.snippet}"</p>
                           </div>
-                          <p className="text-xs text-slate-500 italic border-l-2 border-indigo-300 pl-2">"{r.snippet}"</p>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      <h3 className="text-xs font-bold text-slate-400 uppercase">My Library ({files.length})</h3>
-                      {files.length === 0 && (
-                        <div className="text-center py-10 text-slate-400">
-                          <p className="text-sm">Library is empty.</p>
-                        </div>
-                      )}
-                      {files.map(f => (
-                        <div key={f.id} onClick={() => handleView(f.id, 1)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 active:bg-slate-50">
-                          <div className={`p-2 rounded-lg ${f.url ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400'}`}>
-                            <Icon path={ICONS.file} size={20} />
-                          </div>
-                          <div className="overflow-hidden">
-                            <h4 className="font-bold text-sm truncate">{f.name}</h4>
-                            <p className="text-[10px] text-slate-400">{f.pageCount} Pages • {f.url ? 'Ready' : 'Indexed (Offline)'}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <>
+                       <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Library ({filteredFiles.length})</h3>
+                       {viewMode === 'list' ? (
+                         <div className="space-y-2">
+                           {filteredFiles.map(f => (
+                             <div key={f.id} onClick={() => handleView(f.id)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex gap-3 items-center active:bg-slate-50">
+                               <div className="w-10 h-12 shrink-0 bg-slate-100 rounded flex items-center justify-center overflow-hidden border border-slate-200">
+                                 {f.thumbnail ? <img src={f.thumbnail} className="w-full h-full object-cover" /> : <span className="text-xs font-bold text-slate-400">PDF</span>}
+                               </div>
+                               <div className="flex-1 overflow-hidden">
+                                 <h4 className="font-bold text-sm truncate text-slate-700">{f.name}</h4>
+                                 <div className="flex gap-2 mt-1 overflow-hidden">
+                                    {f.tags?.map(t => <span key={t} className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 rounded font-bold">#{t}</span>)}
+                                 </div>
+                               </div>
+                             </div>
+                           ))}
+                         </div>
+                       ) : (
+                         <div className="grid-layout">
+                           {filteredFiles.map(f => (
+                             <div key={f.id} onClick={() => handleView(f.id)} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm active:scale-95 transition-transform">
+                               <div className="h-28 bg-slate-100 flex items-center justify-center overflow-hidden">
+                                 {f.thumbnail ? <img src={f.thumbnail} className="w-full h-full object-cover" /> : <span className="text-slate-400 font-bold text-xl">PDF</span>}
+                               </div>
+                               <div className="p-2">
+                                 <p className="text-xs font-bold truncate">{f.name}</p>
+                                 <p className="text-[10px] text-slate-400">{f.pageCount} pgs</p>
+                               </div>
+                             </div>
+                           ))}
+                         </div>
+                       )}
+                    </>
                   )}
                 </div>
               </div>
 
-              {/* Viewer */}
+              {/* VIEWER */}
               <div className={`absolute inset-0 bg-slate-100 z-30 flex flex-col transition-transform duration-300 ${isViewerOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-                <div className="bg-white h-14 flex items-center justify-between px-4 border-b border-slate-200 shadow-sm shrink-0 pt-safe-top">
-                  <button onClick={() => setIsViewerOpen(false)} className="p-2 -ml-2 rounded-full hover:bg-slate-100"><Icon path={ICONS.arrowLeft} size={20} /></button>
-                  <h2 className="font-bold text-sm truncate max-w-[200px]">{selectedFile?.name}</h2>
-                  <div className="w-8" /> 
+                <div className="bg-white px-4 py-2 border-b border-slate-200 shadow-sm shrink-0 pt-safe-top flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <button onClick={() => setIsViewerOpen(false)} className="p-2 -ml-2 rounded-full hover:bg-slate-100"><Icon path={ICONS.arrowLeft} /></button>
+                    <h2 className="font-bold text-sm truncate max-w-[150px]">{selectedFile?.name}</h2>
+                    <button onClick={performOCR} className="p-2 text-indigo-600 bg-indigo-50 rounded-lg text-xs font-bold flex gap-1 items-center">
+                      <Icon path={ICONS.scan} size={14} /> Scan Text
+                    </button>
+                  </div>
+                  {/* Tag Input */}
+                  <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+                    {selectedFile?.tags?.map(t => (
+                      <span key={t} onClick={() => removeTag(t)} className="px-2 py-1 bg-indigo-600 text-white text-xs rounded-full flex items-center gap-1 cursor-pointer">
+                        #{t} <span className="opacity-50">x</span>
+                      </span>
+                    ))}
+                    <input 
+                      type="text" 
+                      placeholder="+ Tag" 
+                      className="bg-slate-100 text-xs px-2 py-1 rounded-full w-16 focus:w-24 transition-all outline-none"
+                      onKeyDown={(e) => { if(e.key === 'Enter') { addTag(e.target.value); e.target.value = ''; }}}
+                    />
+                  </div>
                 </div>
-                <div className="flex-1 bg-slate-200">
+                <div className="flex-1 bg-slate-200 relative">
                   {selectedFile?.url && (
                     <iframe src={`${selectedFile.url}#page=${selectedFile.page}&view=FitH`} className="w-full h-full border-none" />
                   )}
@@ -349,17 +528,15 @@
               {showReuploadModal && (
                 <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
                   <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl">
-                    <div className="bg-indigo-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-600">
-                      <Icon path={ICONS.upload} size={24} />
-                    </div>
-                    <h3 className="font-bold text-lg mb-2">Load File?</h3>
-                    <p className="text-sm text-slate-500 mb-4">To view <span className="font-bold text-slate-800">{pendingViewFile?.name}</span>, please select it again from your device.</p>
+                    <h3 className="font-bold text-lg mb-2">Load File</h3>
+                    <p className="text-sm text-slate-500 mb-4">Select <span className="font-bold">{pendingViewFile?.name}</span> to view it.</p>
                     <button onClick={() => reuploadInputRef.current.click()} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold mb-2">Select File</button>
                     <button onClick={() => setShowReuploadModal(false)} className="w-full text-slate-500 py-2">Cancel</button>
                     <input type="file" ref={reuploadInputRef} className="hidden" onChange={handleReupload} />
                   </div>
                 </div>
               )}
+
             </div>
           </div>
         );
@@ -370,3 +547,5 @@
     </script>
   </body>
 </html>
+
+
