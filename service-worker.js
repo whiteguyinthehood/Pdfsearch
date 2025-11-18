@@ -1,4 +1,4 @@
-const CACHE_NAME = 'docusearch-v14';
+const CACHE_NAME = 'docusearch-v15'; // CHANGED TO v15
 const ASSETS = [
   './',
   './index.html',
@@ -8,7 +8,9 @@ const ASSETS = [
   'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
   'https://unpkg.com/@babel/standalone/babel.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+  'https://cdn.jsdelivr.net/npm/fuse.js@6.6.2',
+  'https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js'
 ];
 
 self.addEventListener('install', (event) => {
