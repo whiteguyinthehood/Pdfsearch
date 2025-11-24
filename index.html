@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>DocuSearch Final</title>
+    <title>DocuSearch Omni</title>
     
     <link rel="manifest" href="./manifest.json" />
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -18,6 +18,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js'></script>
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
 
     <style>
       body { background-color: #020617; color: #e2e8f0; user-select: none; font-family: system-ui, -apple-system, sans-serif; }
@@ -27,26 +28,22 @@
       .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       .grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 0.75rem; }
       
-      /* Link Styles */
       .magic-link { transition: all 0.2s; border-radius: 4px; padding: 0 2px; }
       .magic-link:active { background-color: #4338ca; color: white; transform: scale(1.05); display: inline-block; }
       
-      /* Animations */
-      .slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-      @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-      
-      /* Emergency UI */
       #emergency-controls { position: fixed; bottom: 20px; left: 20px; z-index: 9999; display: none; }
       .reset-btn { background: #ef4444; color: white; padding: 10px 15px; border-radius: 8px; font-weight: bold; font-size: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid #b91c1c; }
       #error-log { display: none; position: fixed; top: 0; left: 0; right: 0; background: #7f1d1d; color: white; padding: 20px; z-index: 10000; font-family: monospace; font-size: 12px; white-space: pre-wrap; border-bottom: 2px solid #f87171; }
+      
+      .slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+      @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     </style>
   </head>
   <body>
     
-    <!-- ERROR HANDLER UI -->
     <div id="error-log"></div>
     <div id="emergency-controls">
-      <button onclick="if(confirm('Factory Reset? This deletes data to fix the crash.')){ localStorage.clear(); indexedDB.deleteDatabase('DocuSearch_Master_V1'); window.location.reload(); }" class="reset-btn">
+      <button onclick="if(confirm('Factory Reset? This deletes your library to fix crashes.')){ localStorage.clear(); indexedDB.deleteDatabase('DocuSearch_Master_Dark_V1'); window.location.reload(); }" class="reset-btn">
         ⚠️ FACTORY RESET
       </button>
     </div>
@@ -54,10 +51,9 @@
     <div id="root"></div>
 
     <script>
-      // Global Error Traps
       window.onerror = function(msg, url, line, col, error) {
         document.getElementById('error-log').style.display = 'block';
-        document.getElementById('error-log').innerText = "CRITICAL ERROR:\n" + msg;
+        document.getElementById('error-log').innerText = "CRITICAL ERROR:\n" + msg + "\nLine: " + line;
         document.getElementById('emergency-controls').style.display = 'block';
       };
     </script>
@@ -67,14 +63,12 @@
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
         const { createRoot } = ReactDOM;
 
-        // --- CONFIG ---
-        const DB_NAME = 'DocuSearch_Master_V1';
+        const DB_NAME = 'DocuSearch_Master_Dark_V1';
         const STORE_NAME = 'files_store';
         const PDFJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
         const PDFJS_WORKER_CDN = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
         const BATCH_SIZE = 3;
 
-        // --- ICONS ---
         const Icon = ({ path, size = 20, className = "", ...props }) => (
           <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props} dangerouslySetInnerHTML={{ __html: path }} />
         );
@@ -82,12 +76,13 @@
         const ICONS = {
           search: '<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>',
           upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>',
+          combine: '<path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path><line x1="12" y1="2" x2="12" y2="22"></line><path d="M16 16v-8"></path><path d="M8 16v-8"></path>',
           arrowLeft: '<line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>',
           trash: '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>',
           grid: '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>',
           list: '<line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line>',
           tag: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line>',
-          settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>',
+          settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>',
           download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line>',
           speaker: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>',
           stop: '<rect x="6" y="6" width="12" height="12"></rect>',
@@ -97,69 +92,30 @@
           edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>',
           check: '<polyline points="20 6 9 17 4 12"></polyline>',
           save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline>',
-          scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>'
+          scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>',
+          filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>',
+          close: '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'
         };
 
-        // --- HELPERS & CLEANERS ---
         const cleanText = (str) => {
           if (!str) return "";
-          return str
-            .replace(/-\s+([a-z])/g, '$1') // Fix hyphenation
-            .replace(/ﬀ/g, 'ff').replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬃ/g, 'ffi').replace(/ﬄ/g, 'ffl') // Ligatures
-            .replace(/[\x00-\x09\x0B-\x0C\x0E-\x1F]/g, '') // Control chars
-            .replace(/[ \t]{2,}/g, ' ') // Spacing
-            .replace(/([a-z,])\n([a-z])/g, '$1 $2') // Paragraph join
-            .trim();
+          return str.replace(/-\s+([a-z])/g, '$1').replace(/ﬀ/g, 'ff').replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/[\x00-\x09\x0B-\x0C\x0E-\x1F]/g, '').replace(/[ \t]{2,}/g, ' ').replace(/([a-z,])\n([a-z])/g, '$1 $2').trim();
         };
 
-        // DB Logic (External)
         const openDB = () => new Promise((resolve, reject) => { 
           const r = indexedDB.open(DB_NAME, 1); 
           r.onupgradeneeded = (e) => { const db = e.target.result; if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'id' }); }; 
           r.onsuccess = () => resolve(r.result); 
           r.onerror = () => reject(r.error); 
         });
-
         const saveFileToDB = async (data) => { const db = await openDB(); const tx = db.transaction(STORE_NAME, 'readwrite'); tx.objectStore(STORE_NAME).put(data); };
         const updateFileInDB = async (fileId, updates, callback) => { const db = await openDB(); const tx = db.transaction(STORE_NAME, 'readwrite'); const store = tx.objectStore(STORE_NAME); store.get(fileId).onsuccess = (e) => { const newState = { ...e.target.result, ...updates }; store.put(newState); if(callback) callback(newState); }; };
         const processOutline = async (pdfDoc, items) => { const processed = []; for (const item of items) { let page = 1; try { if (item.dest) { const dest = typeof item.dest === 'string' ? await pdfDoc.getDestination(item.dest) : item.dest; if (dest) { const ref = dest[0]; const index = await pdfDoc.getPageIndex(ref); page = index + 1; } } } catch(e) {} const children = item.items?.length ? await processOutline(pdfDoc, item.items) : []; processed.push({ title: item.title, page, children }); } return processed; };
 
-        // --- EXTERNAL COMPONENTS (Preventing Memory Leaks) ---
-        const ToCList = ({ items, level = 0, onSelect }) => (
-          <div className="flex flex-col">
-            {items.map((it, i) => (
-               <div key={i}>
-                  <button onClick={() => onSelect(it.page)} className="text-left py-3 px-4 w-full border-b border-slate-800 hover:bg-slate-800 text-sm truncate text-slate-300 active:bg-indigo-900/30" style={{paddingLeft: `${level*16+16}px`}}>
-                     <span className="font-medium text-slate-200">{it.title}</span> <span className="text-xs text-slate-500 ml-2">(Pg {it.page})</span>
-                  </button>
-                  {it.children && <ToCList items={it.children} level={level+1} onSelect={onSelect} />}
-               </div>
-            ))}
-          </div>
-        );
+        const ToCList = ({ items, level = 0, onSelect }) => ( <div className="flex flex-col">{items.map((it, i) => ( <div key={i}> <button onClick={() => onSelect(it.page)} className="text-left py-3 px-4 w-full border-b border-slate-800 hover:bg-slate-800 text-sm truncate text-slate-300 active:bg-indigo-900/30" style={{paddingLeft: `${level*16+16}px`}}><span className="font-medium text-slate-200">{it.title}</span> <span className="text-xs text-slate-500 ml-2">(Pg {it.page})</span></button> {it.children && <ToCList items={it.children} level={level+1} onSelect={onSelect} />} </div> ))}</div> );
+        const HighlightedText = ({ text, keywords, onLinkClick }) => { if (!text) return null; if (!keywords || !Array.isArray(keywords) || keywords.length === 0) return <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap">{text}</p>; const terms = keywords.filter(k => k && k.term).map(k => k.term); if(terms.length === 0) return <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap">{text}</p>; const pattern = new RegExp(`(${terms.sort((a,b)=>b.length-a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi'); const parts = text.split(pattern); return ( <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap"> {parts.map((part, i) => { const match = keywords.find(k => k.term.toLowerCase() === part.toLowerCase()); if (match) { return <span key={i} onClick={(e) => { e.stopPropagation(); onLinkClick(part); }} className={`font-bold underline cursor-pointer magic-link ${match.important ? 'text-amber-400 decoration-amber-600 decoration-4' : 'text-indigo-400 decoration-indigo-600 decoration-2'}`}>{part}</span>; } return part; })} </p> ); };
 
-        const HighlightedText = ({ text, keywords, onLinkClick }) => {
-           if (!text) return null;
-           if (!keywords || !Array.isArray(keywords) || keywords.length === 0) return <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap">{text}</p>;
-           const terms = keywords.filter(k => k && k.term).map(k => k.term);
-           if(terms.length === 0) return <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap">{text}</p>;
-           
-           const pattern = new RegExp(`(${terms.sort((a,b)=>b.length-a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
-           const parts = text.split(pattern);
-           return (
-              <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap">
-                 {parts.map((part, i) => {
-                    const match = keywords.find(k => k.term.toLowerCase() === part.toLowerCase());
-                    if (match) { return <span key={i} onClick={(e) => { e.stopPropagation(); onLinkClick(part); }} className={`font-bold underline cursor-pointer magic-link ${match.important ? 'text-amber-400 decoration-amber-600 decoration-4' : 'text-indigo-400 decoration-indigo-600 decoration-2'}`}>{part}</span>; }
-                    return part;
-                 })}
-              </p>
-           );
-        };
-
-        // --- MAIN APP ---
         function App() {
-          // State
           const [files, setFiles] = useState([]); 
           const [savedSearches, setSavedSearches] = useState([]); 
           const [processingQueue, setProcessingQueue] = useState([]);
@@ -181,37 +137,29 @@
           const [showReuploadModal, setShowReuploadModal] = useState(false);
           const [isEditingText, setIsEditingText] = useState(false);
           const [editedTextContent, setEditedTextContent] = useState("");
+          const [showTagFilterModal, setShowTagFilterModal] = useState(false);
+          const [tagQuery, setTagQuery] = useState("");
 
           const fileInputRef = useRef(null);
+          const mergeInputRef = useRef(null);
           const importInputRef = useRef(null);
           const reuploadInputRef = useRef(null);
 
-          // Initialization
           useEffect(() => {
             const script = document.createElement('script'); script.src = PDFJS_CDN; script.onload = () => window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN; document.body.appendChild(script);
             if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
             window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); setDeferredPrompt(e); });
-            
             loadLibrary();
-            
-            try {
-               const saved = localStorage.getItem('docusearch_keywords_v2');
-               if(saved) {
-                 const parsed = JSON.parse(saved);
-                 if (Array.isArray(parsed)) setSavedSearches(parsed);
-               }
-            } catch(e) { console.error("Migration Error", e); }
+            try { const saved = localStorage.getItem('docusearch_keywords_v2'); if(saved) { const parsed = JSON.parse(saved); if (Array.isArray(parsed)) setSavedSearches(parsed); } } catch(e) {}
+            document.getElementById('emergency-controls').style.display = 'none';
           }, []);
 
           const loadLibrary = async () => { try { const db = await openDB(); const tx = db.transaction(STORE_NAME, 'readonly'); const req = tx.objectStore(STORE_NAME).getAll(); req.onsuccess = () => setFiles(req.result.sort((a,b) => b.added - a.added)); } catch(e) {} };
           const installApp = async () => { if (deferredPrompt) { deferredPrompt.prompt(); const { outcome } = await deferredPrompt.userChoice; if (outcome === 'accepted') setDeferredPrompt(null); }};
-
-          // Search/Keyword Logic
           const saveKeyword = (obj) => { const newK = savedSearches.some(k=>k.id===obj.id) ? savedSearches.map(k=>k.id===obj.id?obj:k) : [...savedSearches, obj]; setSavedSearches(newK); localStorage.setItem('docusearch_keywords_v2', JSON.stringify(newK)); };
           const deleteKeyword = (id) => { const newK = savedSearches.filter(k=>k.id!==id); setSavedSearches(newK); localStorage.setItem('docusearch_keywords_v2', JSON.stringify(newK)); };
           const toggleQuickSave = (term) => { if(!term.trim()) return; const exists = savedSearches.find(s => s.term.toLowerCase() === term.toLowerCase()); if (exists) deleteKeyword(exists.id); else saveKeyword({ id: Math.random().toString(36).substr(2,9), term, category: 'General', important: false }); };
 
-          // Queue Processor
           useEffect(() => { if (processingQueue.length > 0 && !isProcessing) processNextBatch(); }, [processingQueue, isProcessing]);
           const processNextBatch = async () => {
             setIsProcessing(true);
@@ -252,56 +200,85 @@
              } catch (err) { console.error(err); }
           };
 
-          // Interaction Handlers
+          const handleMergeSelect = async (e) => {
+             const mergeFiles = Array.from(e.target.files);
+             if (mergeFiles.length < 2) return alert("Select at least 2 PDFs.");
+             setStatusMsg("Merging...");
+             try {
+                const mergedPdf = await PDFLib.PDFDocument.create();
+                for (const file of mergeFiles) { const arrayBuffer = await file.arrayBuffer(); const pdf = await PDFLib.PDFDocument.load(arrayBuffer); const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices()); copiedPages.forEach((page) => mergedPdf.addPage(page)); }
+                const mergedBytes = await mergedPdf.save();
+                const blob = new Blob([mergedBytes], { type: 'application/pdf' });
+                const fileObj = new File([blob], `Merged_${new Date().toISOString().slice(0,10)}.pdf`, { type: 'application/pdf' });
+                const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = fileObj.name; link.click();
+                setProcessingQueue(prev => [...prev, fileObj]); setStatusMsg("Merged!");
+             } catch(err) { alert("Merge Failed: " + err.message); setStatusMsg(""); }
+          };
+
           const handleFileSelect = (e) => { if (!window.pdfjsLib) return alert("Engine loading..."); const newFiles = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf')); if (newFiles.length === 0) return; setProcessingQueue(prev => [...prev, ...newFiles]); };
           const handleView = (fileId, page = 1) => { const f = files.find(x => x.id === fileId); if (f) { setSelectedFile({...f, page}); setIsViewerOpen(true); setShowToC(false); setIsEditingText(false); } };
           const handleKeywordClick = (keyword) => { setIsViewerOpen(false); setSearchQuery(keyword); };
-          const handleScanRequest = () => { if(selectedFile) setShowReuploadModal(true); }; // FIXED FUNCTION
+          const handleScanRequest = () => { if(selectedFile) setShowReuploadModal(true); };
           const enableEditMode = () => { const txt = selectedFile?.textContent?.[(selectedFile?.page||1)-1] || ""; setEditedTextContent(txt); setIsEditingText(true); };
           const saveEditedText = () => { if(!selectedFile) return; const pageIdx = (selectedFile.page || 1) - 1; const newContent = [...selectedFile.textContent]; newContent[pageIdx] = editedTextContent; updateFileInDB(selectedFile.id, { textContent: newContent }, (newS) => setSelectedFile({...selectedFile, textContent: newS.textContent})); setIsEditingText(false); };
-          const performReScan = async (e) => {
-             const file = e.target.files[0]; if(!file || file.name !== selectedFile.name) { alert("Filename mismatch."); return; }
-             setShowReuploadModal(false); setStatusMsg("Scanning...");
-             try {
-                const url = URL.createObjectURL(file); const loadingTask = window.pdfjsLib.getDocument(url); const pdf = await loadingTask.promise; const page = await pdf.getPage(selectedFile.page || 1); const viewport = page.getViewport({ scale: 2.0 }); const canvas = document.createElement('canvas'); canvas.width = viewport.width; canvas.height = viewport.height; await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-                const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
-                const pageIdx = (selectedFile.page || 1) - 1; const newContent = [...selectedFile.textContent]; newContent[pageIdx] = cleanText(text);
-                updateFileInDB(selectedFile.id, { textContent: newContent }, (newS) => setSelectedFile({...selectedFile, textContent: newS.textContent}));
-                setStatusMsg("Done!"); setTimeout(() => setStatusMsg(''), 2000); URL.revokeObjectURL(url);
-             } catch(err) { alert("Scan failed"); }
-          };
+          const performReScan = async (e) => { const file = e.target.files[0]; if(!file || file.name !== selectedFile.name) { alert("Filename mismatch."); return; } setShowReuploadModal(false); setStatusMsg("Scanning..."); try { const url = URL.createObjectURL(file); const loadingTask = window.pdfjsLib.getDocument(url); const pdf = await loadingTask.promise; const page = await pdf.getPage(selectedFile.page || 1); const viewport = page.getViewport({ scale: 2.0 }); const canvas = document.createElement('canvas'); canvas.width = viewport.width; canvas.height = viewport.height; await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise; const { data: { text } } = await Tesseract.recognize(canvas, 'eng'); const pageIdx = (selectedFile.page || 1) - 1; const newContent = [...selectedFile.textContent]; newContent[pageIdx] = cleanText(text); updateFileInDB(selectedFile.id, { textContent: newContent }, (newS) => setSelectedFile({...selectedFile, textContent: newS.textContent})); setStatusMsg("Done!"); setTimeout(() => setStatusMsg(''), 2000); URL.revokeObjectURL(url); } catch(err) { alert("Scan failed"); } };
           const addTag = (t) => { if(t && selectedFile){ const nt=[...new Set([...(selectedFile.tags||[]), t])]; updateFileInDB(selectedFile.id, {tags:nt}, (n)=>setSelectedFile({...selectedFile, tags:n.tags})); }};
           const removeTag = (t) => { if(selectedFile){ const nt=selectedFile.tags.filter(x=>x!==t); updateFileInDB(selectedFile.id, {tags:nt}, (n)=>setSelectedFile({...selectedFile, tags:n.tags})); }};
           
-          // Search & TTS Effects
           useEffect(() => { if (!searchQuery.trim()) { setSearchResults([]); return; } const fuse = new Fuse(files, { keys: ['name', 'textContent', 'tags'], threshold: 0.4 }); const res = fuse.search(searchQuery).map(r => { const item = r.item; let snippet = ""; let page = 1; item.textContent.forEach((txt, i) => { if (txt.toLowerCase().includes(searchQuery.toLowerCase())) { snippet = txt.substring(Math.max(0, txt.toLowerCase().indexOf(searchQuery.toLowerCase())-30), txt.length).substring(0, 80); page = i + 1; } }); return { fileId: item.id, fileName: item.name, page, snippet: snippet || "Match", thumbnail: item.thumbnail }; }); setSearchResults(res); }, [searchQuery, files]);
           const speakText = () => { if(isSpeaking) { window.speechSynthesis.cancel(); setIsSpeaking(false); return; } if(!selectedFile) return; const txt = selectedFile.textContent[(selectedFile.page||1)-1]; if(!txt || txt==="[Image]") return alert("No text."); const u = new SpeechSynthesisUtterance(txt); u.onend = () => setIsSpeaking(false); setIsSpeaking(true); window.speechSynthesis.speak(u); };
           useEffect(() => { return () => window.speechSynthesis.cancel(); }, [selectedFile]);
-
-          // Import/Export
           const exportData = () => { openDB().then(db => { db.transaction(STORE_NAME,'readonly').objectStore(STORE_NAME).getAll().onsuccess = (e) => { const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(e.target.result)); a.download = "docusearch_master_backup.json"; a.click(); }; }); };
           const importData = (e) => { const f = e.target.files[0]; if(!f) return; const r = new FileReader(); r.onload = async (ev) => { try { const d = JSON.parse(ev.target.result); const db=await openDB(); const tx=db.transaction(STORE_NAME,'readwrite'); d.forEach(i=>tx.objectStore(STORE_NAME).put(i)); location.reload(); } catch(err){ alert("Error importing"); }}; r.readAsText(f); };
 
           const groupedKeywords = useMemo(() => { const groups = {}; groups['Priority'] = savedSearches.filter(s => s.important); savedSearches.forEach(s => { if (s.important) return; const cat = s.category || 'General'; if (!groups[cat]) groups[cat] = []; groups[cat].push(s); }); return groups; }, [savedSearches]);
           const filteredFiles = files.filter(f => activeTagFilter ? f.tags?.includes(activeTagFilter) : true);
           const allTags = [...new Set(files.flatMap(f => f.tags || []))];
+          
+          const visibleTags = useMemo(() => {
+             if(!tagQuery.trim()) return allTags.sort();
+             return allTags.filter(t => t.toLowerCase().includes(tagQuery.toLowerCase())).sort();
+          }, [allTags, tagQuery]);
 
           return (
             <div className="flex flex-col h-[100dvh] bg-slate-950 text-slate-200 overflow-hidden font-sans">
               <div className="pt-safe-top bg-slate-900 border-b border-slate-800 pb-2 px-4 flex items-end justify-between shadow-sm z-20">
                  <div className="flex items-center gap-2 mt-3">
                     <div className="bg-indigo-600 p-1.5 rounded-lg text-white cursor-pointer" onClick={() => setShowSettings(!showSettings)}><Icon path={ICONS.settings} size={20} /></div>
-                    <h1 className="font-bold text-lg leading-none text-white">DocuSearch <span className="text-indigo-400">Final</span></h1>
+                    <h1 className="font-bold text-lg leading-none text-white">DocuSearch <span className="text-indigo-400">Omni</span></h1>
                  </div>
                  <div className="flex gap-3">
-                    <button onClick={() => setShowSavedSearches(!showSavedSearches)} className={`p-1 ${showSavedSearches ? 'text-indigo-400' : 'text-slate-400'}`}><Icon path={ICONS.tag} size={22} /></button>
+                    <button onClick={() => setShowSavedSearches(!showSavedSearches)} className={`p-1 ${showSavedSearches ? 'text-indigo-400' : 'text-slate-400'}`}><Icon path={ICONS.listIcon} size={22} /></button>
                     <button onClick={() => setViewMode(viewMode==='list'?'grid':'list')} className="text-slate-400 p-1"><Icon path={viewMode==='list'?ICONS.grid:ICONS.list} /></button>
                  </div>
               </div>
 
               {showSavedSearches && ( <div className="absolute inset-x-0 top-[4rem] bg-slate-900 border-b border-slate-800 shadow-xl z-30 max-h-[60vh] overflow-y-auto animate-in slide-in-from-top-2 flex flex-col"> <div className="p-3 border-b border-slate-800 bg-slate-900 flex justify-between items-center sticky top-0 z-10"> <h3 className="text-xs font-bold text-slate-500 uppercase">Knowledge Graph</h3> <button onClick={() => setIsEditingKeywords(!isEditingKeywords)} className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1 ${isEditingKeywords ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}><Icon path={ICONS.edit} size={12} /> Manage</button> </div> <div className="p-4 space-y-4"> {savedSearches.length === 0 && <p className="text-sm text-slate-500 italic text-center">Star a search term to add it here.</p>} {Object.entries(groupedKeywords).map(([category, items]) => ( items.length > 0 && ( <div key={category}> <h4 className="text-[10px] font-bold text-slate-600 uppercase mb-2 tracking-wider">{category}</h4> <div className="flex flex-wrap gap-2"> {items.map(k => ( <button key={k.id} onClick={() => { if(isEditingKeywords) { setKeywordToEdit(k); } else { setSearchQuery(k.term); setShowSavedSearches(false); }}} className={`flex items-center gap-1 px-3 py-1.5 border rounded-full text-sm font-medium shadow-sm transition-all ${k.important ? 'bg-amber-900/30 border-amber-700/50 text-amber-400' : 'bg-slate-800 border-slate-700 text-slate-300'} ${isEditingKeywords ? 'hover:bg-indigo-900/30 hover:border-indigo-500' : 'active:scale-95'}`}> {k.important && <Icon path={ICONS.starFilled} size={10} className="text-amber-400" />} {k.term} {isEditingKeywords && <Icon path={ICONS.edit} size={10} className="ml-1 opacity-50" />} </button> ))} </div> </div> ) ))} </div> </div> )}
+              
+              {showTagFilterModal && (
+                 <div className="absolute inset-0 z-40 bg-black/70 backdrop-blur-sm flex flex-col p-4 pt-20 animate-in slide-in-from-bottom-5">
+                    <div className="bg-slate-900 border border-slate-700 rounded-2xl flex flex-col max-h-full shadow-2xl overflow-hidden">
+                       <div className="p-4 border-b border-slate-800 flex gap-2 items-center bg-slate-900">
+                          <Icon path={ICONS.tag} size={20} className="text-indigo-400" />
+                          <input type="text" autoFocus placeholder="Find a tag..." value={tagQuery} onChange={e => setTagQuery(e.target.value)} className="flex-1 bg-transparent text-white outline-none font-medium" />
+                          <button onClick={() => setShowTagFilterModal(false)} className="p-1 text-slate-400"><Icon path={ICONS.close} /></button>
+                       </div>
+                       <div className="flex-1 overflow-y-auto p-2">
+                          {visibleTags.length === 0 ? <p className="text-center text-slate-500 p-4">No tags found.</p> : (
+                             <div className="space-y-1">
+                                {activeTagFilter && <button onClick={() => { setActiveTagFilter(null); setShowTagFilterModal(false); }} className="w-full text-left p-3 rounded-lg bg-indigo-900/30 text-indigo-300 border border-indigo-800 font-bold flex justify-between items-center"><span>Current: #{activeTagFilter}</span> <span className="text-xs uppercase">Clear</span></button>}
+                                {visibleTags.map(t => (
+                                   <button key={t} onClick={() => { setActiveTagFilter(t); setShowTagFilterModal(false); }} className="w-full text-left p-3 rounded-lg hover:bg-slate-800 text-slate-300 font-medium border border-transparent hover:border-slate-700">#{t}</button>
+                                ))}
+                             </div>
+                          )}
+                       </div>
+                    </div>
+                 </div>
+              )}
+
               {keywordToEdit && ( <div className="absolute inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"> <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-6 shadow-2xl slide-up text-slate-200"> <h3 className="font-bold text-lg mb-4 text-white">Edit Keyword</h3> <div className="space-y-4"> <div><label className="text-xs font-bold text-slate-500 uppercase">Term</label><input type="text" value={keywordToEdit.term} onChange={(e) => setKeywordToEdit({...keywordToEdit, term: e.target.value})} className="w-full p-2 border border-slate-700 rounded-lg font-bold text-white bg-slate-800 focus:border-indigo-500 outline-none" /></div> <div> <label className="text-xs font-bold text-slate-500 uppercase">Category</label> <select value={keywordToEdit.category} onChange={(e) => setKeywordToEdit({...keywordToEdit, category: e.target.value})} className="w-full p-3 border border-slate-700 rounded-lg text-slate-200 bg-slate-800 font-medium h-12 outline-none"> <option value="General">General</option><option value="Finance">Finance</option><option value="People">People</option><option value="Technical">Technical</option><option value="Work">Work</option><option value="Personal">Personal</option><option value="Legal">Legal</option><option value="Medical">Medical</option> </select> </div> <div className="flex items-center gap-3 p-3 bg-slate-800 border border-slate-700 rounded-lg cursor-pointer" onClick={() => setKeywordToEdit({...keywordToEdit, important: !keywordToEdit.important})}> <div className={`w-5 h-5 rounded border flex items-center justify-center ${keywordToEdit.important ? 'bg-amber-500 border-amber-500 text-white' : 'bg-slate-900 border-slate-600'}`}>{keywordToEdit.important && <Icon path={ICONS.check} size={14} />}</div> <span className="text-sm font-medium">Mark as Important</span> </div> <div className="flex gap-2 pt-2"> <button onClick={() => { deleteKeyword(keywordToEdit.id); setKeywordToEdit(null); }} className="flex-1 p-3 text-red-400 font-bold bg-red-900/20 border border-red-900/50 rounded-xl">Delete</button> <button onClick={() => setKeywordToEdit(null)} className="flex-1 p-3 text-slate-400 font-bold">Cancel</button> <button onClick={() => { saveKeyword(keywordToEdit); setKeywordToEdit(null); }} className="flex-1 p-3 bg-indigo-600 text-white font-bold rounded-xl">Save</button> </div> </div> </div> </div> )}
-              {showSettings && ( <div className="bg-slate-900 text-slate-200 p-4 space-y-4 absolute top-16 left-0 right-0 z-40 shadow-xl border-b border-slate-800 animate-in slide-in-from-top-5"> {deferredPrompt && <button onClick={installApp} className="flex items-center gap-2 w-full p-3 bg-indigo-600 rounded-lg font-bold shadow-lg text-white"><Icon path={ICONS.download} /> Install App</button>} <button onClick={exportData} className="flex items-center gap-2 w-full p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700"><Icon path={ICONS.download} /> Backup</button> <button onClick={() => importInputRef.current.click()} className="flex items-center gap-2 w-full p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700"><Icon path={ICONS.upload} /> Restore</button> <button onClick={() => { if(confirm("Clear keywords?")) { setSavedSearches([]); localStorage.removeItem('docusearch_keywords_v2'); }}} className="flex items-center gap-2 w-full p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700"><Icon path={ICONS.trash} /> Clear Graph</button> <button onClick={() => { if(confirm("Reset?")) { indexedDB.deleteDatabase(DB_NAME); location.reload(); }}} className="flex items-center gap-2 w-full p-3 bg-red-900/20 text-red-400 border border-red-900/50 rounded-lg"><Icon path={ICONS.trash} /> Reset All</button> <input type="file" ref={importInputRef} className="hidden" onChange={importData} accept=".json" /> </div> )}
+              {showSettings && ( <div className="bg-slate-900 text-slate-200 p-4 space-y-4 absolute top-16 left-0 right-0 z-40 shadow-xl border-b border-slate-800 animate-in slide-in-from-top-5"> {deferredPrompt && <button onClick={installApp} className="flex items-center gap-2 w-full p-3 bg-indigo-600 rounded-lg font-bold shadow-lg text-white"><Icon path={ICONS.download} /> Install App</button>} <button onClick={exportData} className="flex items-center gap-2 w-full p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700"><Icon path={ICONS.download} /> Backup Library</button> <button onClick={() => importInputRef.current.click()} className="flex items-center gap-2 w-full p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700"><Icon path={ICONS.upload} /> Restore Library</button> <button onClick={() => { if(confirm("Clear keywords?")) { setSavedSearches([]); localStorage.removeItem('docusearch_keywords_v2'); }}} className="flex items-center gap-2 w-full p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700"><Icon path={ICONS.trash} /> Clear Knowledge Graph</button> <button onClick={() => { if(confirm("Reset App?")) { indexedDB.deleteDatabase(DB_NAME); location.reload(); }}} className="flex items-center gap-2 w-full p-3 bg-red-900/20 text-red-400 border border-red-900/50 rounded-lg"><Icon path={ICONS.trash} /> Reset All Data</button> <input type="file" ref={importInputRef} className="hidden" onChange={importData} accept=".json" /> </div> )}
               {showReuploadModal && ( <div className="absolute inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6"> <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl"> <h3 className="font-bold text-lg mb-2 text-white">Scan Page</h3> <p className="text-sm text-slate-400 mb-4">To fix this page, select <span className="font-bold text-white">{selectedFile?.name}</span> again.</p> <button onClick={() => reuploadInputRef.current.click()} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold mb-2">Select File</button> <button onClick={() => setShowReuploadModal(false)} className="w-full text-slate-400 py-2">Cancel</button> <input type="file" ref={reuploadInputRef} className="hidden" onChange={performReScan} /> </div> </div> )}
 
               <div className="flex-1 overflow-hidden relative flex flex-col md:flex-row">
@@ -313,6 +290,7 @@
                             <input type="text" placeholder="Search..." className="w-full pl-10 pr-4 py-3 bg-slate-800 border border-slate-700 text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-slate-500" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                          </div>
                          {searchQuery.trim() && <button onClick={() => toggleQuickSave(searchQuery)} className={`p-3 rounded-xl transition-colors ${savedSearches.some(s => s.term.toLowerCase() === searchQuery.toLowerCase()) ? 'bg-amber-900/30 text-amber-400 border border-amber-700/50' : 'bg-slate-800 text-slate-400 border border-slate-700'}`}><Icon path={savedSearches.some(s => s.term.toLowerCase() === searchQuery.toLowerCase()) ? ICONS.starFilled : ICONS.star} /></button>}
+                         <button onClick={() => setShowTagFilterModal(true)} className={`p-3 rounded-xl border transition-colors ${activeTagFilter ? 'bg-indigo-900/30 border-indigo-500 text-indigo-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}><Icon path={ICONS.tag} /></button>
                       </div>
                       {allTags.length > 0 && (
                          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
@@ -320,8 +298,12 @@
                             {allTags.map(t => <button key={t} onClick={() => setActiveTagFilter(t===activeTagFilter?null:t)} className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${activeTagFilter===t?'bg-indigo-600 text-white':'bg-indigo-900/30 text-indigo-400 border border-indigo-800'}`}>#{t}</button>)}
                          </div>
                       )}
-                      <button onClick={() => fileInputRef.current.click()} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow active:scale-95 transition-transform flex justify-center gap-2"><Icon path={ICONS.upload} size={18} /> Import PDFs</button>
+                      <div className="flex gap-2">
+                         <button onClick={() => fileInputRef.current.click()} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow active:scale-95 transition-transform flex justify-center gap-2 items-center"><Icon path={ICONS.upload} size={18} /> Import</button>
+                         <button onClick={() => mergeInputRef.current.click()} className="flex-1 py-3 bg-slate-800 border border-slate-700 text-slate-300 font-bold rounded-xl shadow active:scale-95 transition-transform flex justify-center gap-2 items-center"><Icon path={ICONS.combine} size={18} /> Combine</button>
+                      </div>
                       <input type="file" ref={fileInputRef} multiple accept=".pdf" className="hidden" onChange={handleFileSelect} />
+                      <input type="file" ref={mergeInputRef} multiple accept=".pdf" className="hidden" onChange={handleMergeSelect} />
                       {(processingQueue.length > 0 || statusMsg) && <div className="bg-indigo-900/30 p-2 rounded-lg border border-indigo-800 text-xs text-indigo-300 text-center font-mono animate-pulse">{statusMsg || `Queue: ${processingQueue.length} files remaining...`}</div>}
                    </div>
 
