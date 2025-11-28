@@ -139,34 +139,45 @@
           });
         };
 
-        // TOOL 2: Extracts Text from SVG DOM (Fixes Tables & Layouts)
+         // TOOL 2: Extracts Text from SVG DOM (Fixes Tables & Layouts)
         const extractTextFromSVG = async (pdfDoc, pageNum) => {
-          const page = await pdfDoc.getPage(pageNum);
-          const operatorList = await page.getOperatorList();
-          const viewport = page.getViewport({ scale: 1.0 });
-          const svgGfx = new window.pdfjsLib.SVGGraphics(page.commonObjs, page.objs);
-          const svg = await svgGfx.getSVG(operatorList, viewport);
-          
-          const rawElements = Array.from(svg.querySelectorAll("text > tspan, text"));
-          const textItems = rawElements.map(el => {
-            const transform = el.getAttribute("transform");
-            let x = 0, y = 0;
-            if (transform && transform.startsWith("matrix")) {
-               const matrix = transform.match(/matrix\(([^)]+)\)/)[1].split(' ').map(parseFloat);
-               x = matrix[4]; y = matrix[5];
-            } else {
-               x = parseFloat(el.getAttribute("x")) || 0; y = parseFloat(el.getAttribute("y")) || 0;
-            }
-            return { text: el.textContent, x, y };
-          });
+          try {
+            const page = await pdfDoc.getPage(pageNum);
+            const operatorList = await page.getOperatorList();
+            const viewport = page.getViewport({ scale: 1.0 });
+            
+            // FIX: Access pdfjsLib via window
+            const svgGfx = new window.pdfjsLib.SVGGraphics(page.commonObjs, page.objs);
+            const svg = await svgGfx.getSVG(operatorList, viewport);
+            
+            const rawElements = Array.from(svg.querySelectorAll("text > tspan, text"));
+            const textItems = rawElements.map(el => {
+              const transform = el.getAttribute("transform");
+              let x = 0, y = 0;
+              if (transform && transform.startsWith("matrix")) {
+                 const matrix = transform.match(/matrix\(([^)]+)\)/)[1].split(' ').map(parseFloat);
+                 x = matrix[4]; y = matrix[5];
+              } else {
+                 x = parseFloat(el.getAttribute("x")) || 0; y = parseFloat(el.getAttribute("y")) || 0;
+              }
+              return { text: el.textContent, x, y };
+            });
 
-          // Sort: Top-to-Bottom, then Left-to-Right
-          textItems.sort((a, b) => {
-             const rowDiff = Math.abs(a.y - b.y);
-             if (rowDiff < 10) return a.x - b.x; 
-             return a.y - b.y;
-          });
-          return textItems.map(t => t.text).join(" ");
+            // Sort: Top-to-Bottom, then Left-to-Right
+            textItems.sort((a, b) => {
+               const rowDiff = Math.abs(a.y - b.y);
+               if (rowDiff < 10) return a.x - b.x; 
+               return a.y - b.y;
+            });
+            return textItems.map(t => t.text).join(" ");
+            
+          } catch (e) {
+            console.error("SVG Extract Failed, falling back to standard:", e);
+            // Fallback to standard text if SVG fails
+            const page = await pdfDoc.getPage(pageNum);
+            const txt = await page.getTextContent();
+            return txt.items.map(i => i.str).join(' ');
+          }
         };
 
         // TOOL 3: Heuristic Cleaner (Final Polish)
