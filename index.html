@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>DocuSearch v33.1 Omni</title>
+    <title>DocuSearch v33.2 Omni</title>
     
     <link rel="manifest" href="./manifest.json" />
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -26,11 +26,15 @@
       .pb-safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
       .scrollbar-hide::-webkit-scrollbar { display: none; }
       .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+      .grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 0.75rem; }
+      
       .magic-link { transition: all 0.2s; border-radius: 4px; padding: 0 2px; }
       .magic-link:active { background-color: #4338ca; color: white; transform: scale(1.05); display: inline-block; }
+      
       #emergency-controls { position: fixed; bottom: 20px; left: 20px; z-index: 9999; display: none; }
       .reset-btn { background: #ef4444; color: white; padding: 10px 15px; border-radius: 8px; font-weight: bold; font-size: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid #b91c1c; }
       #error-log { display: none; position: fixed; top: 0; left: 0; right: 0; background: #7f1d1d; color: white; padding: 20px; z-index: 10000; font-family: monospace; font-size: 12px; white-space: pre-wrap; border-bottom: 2px solid #f87171; }
+      
       .slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
       @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     </style>
@@ -39,7 +43,9 @@
     
     <div id="error-log"></div>
     <div id="emergency-controls">
-      <button onclick="if(confirm('Factory Reset? This deletes your library to fix crashes.')){ localStorage.clear(); indexedDB.deleteDatabase('DocuSearch_Forge_V2'); window.location.reload(); }" class="reset-btn">⚠️ FACTORY RESET</button>
+      <button onclick="if(confirm('Factory Reset? This deletes your library to fix crashes.')){ localStorage.clear(); indexedDB.deleteDatabase('DocuSearch_Forge_V2'); window.location.reload(); }" class="reset-btn">
+        ⚠️ FACTORY RESET
+      </button>
     </div>
 
     <div id="root"></div>
@@ -51,7 +57,6 @@
         document.getElementById('emergency-controls').style.display = 'block';
       };
     </script>
-
     <script type="text/babel">
       try {
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
@@ -91,8 +96,7 @@
           wand: '<path d="M15 4V2"></path><path d="M15 16v-2"></path><path d="M8 9h2"></path><path d="M20 9h2"></path><path d="M17.8 11.8 19 13"></path><path d="M15 9h0"></path><path d="M17.8 6.2 19 5"></path><path d="m3 21 9-9"></path><path d="M12.2 6.2 11 5"></path>'
         };
 
-        // --- GEMINI 2.5 API & HELPERS ---
-        // 1. VISION API (Repair Single Page)
+        // --- GEMINI 2.5 API ---
         const callGemini = async (base64Image, apiKey) => {
           if (!apiKey) throw new Error("Missing API Key");
           const cleanBase64 = base64Image.split(',')[1];
@@ -105,13 +109,11 @@
           return data.candidates?.[0]?.content?.parts?.[0]?.text || "AI Extraction Failed";
         };
 
-        // 2. TEXT BATCH API (Magic Wand)
         const cleanTextBatch = async (textArray, apiKey) => {
           if (!apiKey) throw new Error("Missing API Key");
           const MARKER = "|||PAGE|||"; 
           const rawBlock = textArray.join(` ${MARKER} `);
           const prompt = `You are a Text Cleaner. Your job is to fix OCR errors, spacing, and broken hyphens. RULES: 1. Output the text EXACTLY as structured but cleaned. 2. YOU MUST PRESERVE the separator "${MARKER}" between pages. 3. Do not summarize. 4. Return only cleaned text.`;
-          
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt + "\n\nTEXT TO CLEAN:\n" + rawBlock }] }] })
@@ -122,22 +124,60 @@
           return cleanBlock.split(MARKER).map(s => s.trim());
         };
 
-        // 3. ADVANCED HEURISTIC CLEANING (Ligatures, Paragraphs, Headers)
-        const cleanText = (str) => {
-          if (!str) return "";
-          // A. Ligature Normalization
-          let s = str.replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬃ/g, 'ffi').replace(/ﬀ/g, 'ff');
-          // B. Artifact Stripping (Remove Page Numbers)
-          s = s.replace(/^Page \d+.*$/gm, '').replace(/^\d+ of \d+$/gm, '');
-          // C. Smart Paragraph Merge (Join lines unless they look like headers or lists)
-          // Look for: Lowercase/comma at end of line -> Join with next
-          s = s.replace(/([a-z,])\n(?=[a-z])/g, '$1 ');
-          // D. Header Isolation (Caps short lines get spacing)
-          s = s.replace(/^([A-Z\s]{3,50})$/gm, '\n\n$1\n\n');
-          // E. General Cleanup
-          return s.replace(/-\s+([a-z])/g, '$1').replace(/[ \t]{2,}/g, ' ').trim();
+        // --- ADVANCED JS SUITE (SVG + LAYERS) ---
+        // TOOL 1: Disables Shadow/Background Layers (Fixes "Echo")
+        const disableShadowLayers = async (pdfDoc) => {
+          const optionalContentConfig = await pdfDoc.getOptionalContentConfig();
+          const groups = optionalContentConfig.getOrder();
+          if (!groups) return;
+          groups.forEach((group) => {
+            const name = group.name ? group.name.toLowerCase() : "";
+            if (name.includes("shadow") || name.includes("background") || name.includes("multiply")) {
+              console.log(`[Layer Scalpel] Disabling: ${group.name}`);
+              optionalContentConfig.setVisibility(group.id, false);
+            }
+          });
         };
 
+        // TOOL 2: Extracts Text from SVG DOM (Fixes Tables & Layouts)
+        const extractTextFromSVG = async (pdfDoc, pageNum) => {
+          const page = await pdfDoc.getPage(pageNum);
+          const operatorList = await page.getOperatorList();
+          const viewport = page.getViewport({ scale: 1.0 });
+          const svgGfx = new pdfjsLib.SVGGraphics(page.commonObjs, page.objs);
+          const svg = await svgGfx.getSVG(operatorList, viewport);
+          
+          const rawElements = Array.from(svg.querySelectorAll("text > tspan, text"));
+          const textItems = rawElements.map(el => {
+            const transform = el.getAttribute("transform");
+            let x = 0, y = 0;
+            if (transform && transform.startsWith("matrix")) {
+               const matrix = transform.match(/matrix\(([^)]+)\)/)[1].split(' ').map(parseFloat);
+               x = matrix[4]; y = matrix[5];
+            } else {
+               x = parseFloat(el.getAttribute("x")) || 0; y = parseFloat(el.getAttribute("y")) || 0;
+            }
+            return { text: el.textContent, x, y };
+          });
+
+          // Sort: Top-to-Bottom, then Left-to-Right
+          textItems.sort((a, b) => {
+             const rowDiff = Math.abs(a.y - b.y);
+             if (rowDiff < 10) return a.x - b.x; 
+             return a.y - b.y;
+          });
+          return textItems.map(t => t.text).join(" ");
+        };
+
+        // TOOL 3: Heuristic Cleaner (Final Polish)
+        const cleanText = (str) => {
+          if (!str) return "";
+          let s = str.replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬃ/g, 'ffi').replace(/ﬀ/g, 'ff');
+          s = s.replace(/^Page \d+.*$/gm, '').replace(/^\d+ of \d+$/gm, '');
+          s = s.replace(/([a-z,])\n(?=[a-z])/g, '$1 ');
+          s = s.replace(/^([A-Z\s]{3,50})$/gm, '\n\n$1\n\n');
+          return s.replace(/-\s+([a-z])/g, '$1').replace(/[ \t]{2,}/g, ' ').trim();
+        };
         // --- DATABASE & STATE ---
         const openDB = () => new Promise((resolve, reject) => { 
           const r = indexedDB.open(DB_NAME, 1); 
@@ -148,8 +188,19 @@
         const saveFileToDB = async (data) => { const db = await openDB(); const tx = db.transaction(STORE_NAME, 'readwrite'); tx.objectStore(STORE_NAME).put(data); };
         const updateFileInDB = async (id, updates, cb) => { const db = await openDB(); const tx = db.transaction(STORE_NAME, 'readwrite'); const store = tx.objectStore(STORE_NAME); store.get(id).onsuccess = (e) => { const n={...e.target.result, ...updates}; store.put(n); if(cb) cb(n); }; };
         const processOutline = async (pdfDoc, items) => { const processed = []; for (const item of items) { let page = 1; try { if (item.dest) { const dest = typeof item.dest === 'string' ? await pdfDoc.getDestination(item.dest) : item.dest; if (dest) { const ref = dest[0]; const index = await pdfDoc.getPageIndex(ref); page = index + 1; } } } catch(e) {} const children = item.items?.length ? await processOutline(pdfDoc, item.items) : []; processed.push({ title: item.title, page, children }); } return processed; };
+
         const ToCList = ({ items, level = 0, onSelect }) => ( <div className="flex flex-col">{items.map((it, i) => ( <div key={i}> <button onClick={() => onSelect(it.page)} className="text-left py-3 px-4 w-full border-b border-slate-800 hover:bg-slate-800 text-sm truncate text-slate-300 active:bg-indigo-900/30" style={{paddingLeft: `${level*16+16}px`}}><span className="font-medium text-slate-200">{it.title}</span> <span className="text-xs text-slate-500 ml-2">(Pg {it.page})</span></button> {it.children && <ToCList items={it.children} level={level+1} onSelect={onSelect} />} </div> ))}</div> );
-        const HighlightedText = ({ text, keywords, onLinkClick }) => { if (!text) return null; if (!keywords || !Array.isArray(keywords) || keywords.length === 0) return <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap">{text}</p>; const terms = keywords.filter(k => k && k.term).map(k => k.term); if(terms.length === 0) return <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap">{text}</p>; const pattern = new RegExp(`(${terms.sort((a,b)=>b.length-a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi'); const parts = text.split(pattern); return ( <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap"> {parts.map((part, i) => { const match = keywords.find(k => k.term.toLowerCase() === part.toLowerCase()); if (match) { return <span key={i} onClick={(e) => { e.stopPropagation(); onLinkClick(part); }} className={`font-bold underline cursor-pointer magic-link ${match.important ? 'text-amber-400 decoration-amber-600 decoration-4' : 'text-indigo-400 decoration-indigo-600 decoration-2'}`}>{part}</span>; } return part; })} </p> ); };
+        
+        const HighlightedText = ({ text, keywords, onLinkClick }) => { 
+          if (!text) return null; 
+          if (!keywords || !Array.isArray(keywords) || keywords.length === 0) return <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap">{text}</p>; 
+          const terms = keywords.filter(k => k && k.term).map(k => k.term); 
+          if(terms.length === 0) return <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap">{text}</p>; 
+          const pattern = new RegExp(`(${terms.sort((a,b)=>b.length-a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi'); 
+          const parts = text.split(pattern); 
+          return ( <p className="text-lg leading-loose text-slate-300 font-serif whitespace-pre-wrap"> {parts.map((part, i) => { const match = keywords.find(k => k.term.toLowerCase() === part.toLowerCase()); if (match) { return <span key={i} onClick={(e) => { e.stopPropagation(); onLinkClick(part); }} className={`font-bold underline cursor-pointer magic-link ${match.important ? 'text-amber-400 decoration-amber-600 decoration-4' : 'text-indigo-400 decoration-indigo-600 decoration-2'}`}>{part}</span>; } return part; })} </p> ); 
+        };
+
         function App() {
           const [files, setFiles] = useState([]); 
           const [queue, setQueue] = useState([]);
@@ -183,7 +234,7 @@
           const folderInputRef = useRef(null);
           const mergeInputRef = useRef(null);
           const importInputRef = useRef(null);
-
+          const reuploadInputRef = useRef(null);
           useEffect(() => {
             const script = document.createElement('script'); script.src = PDFJS_CDN; script.onload = () => window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN; document.body.appendChild(script);
             if('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js');
@@ -216,31 +267,22 @@
           const processFile = async (file, remaining) => {
             try {
                const id = `${file.name}-${file.size}`; if(files.some(f=>f.id===id)) return;
-               setStatusMsg(`Processing: ${file.name} (${remaining})`);
+               setStatusMsg(`Smart Scan: ${file.name} (${remaining})`);
                const url = URL.createObjectURL(file);
                const task = window.pdfjsLib.getDocument(url);
                const pdf = await task.promise;
                
+               // 1. ACTIVATE LAYER SCALPEL (Removes Shadow Text)
+               await disableShadowLayers(pdf);
+               
                let thumb = null;
                try { const p1 = await pdf.getPage(1); const vp = p1.getViewport({scale:0.5}); const cvs = document.createElement('canvas'); cvs.width=vp.width; cvs.height=vp.height; await p1.render({canvasContext:cvs.getContext('2d'), viewport:vp}).promise; thumb=cvs.toDataURL('image/jpeg',0.6); } catch(e){}
 
-               // Text Extraction with Spatial Filtering
+               // 2. ACTIVATE SVG EXTRACTION (Fixes Layouts)
                const textArr = [];
                for(let i=1; i<=pdf.numPages; i++){
-                 const p = await pdf.getPage(i);
-                 const vp = p.getViewport({scale:1.0}); // Get page dimensions
-                 const txt = await p.getTextContent();
-                 
-                 // SPATIAL HEURISTIC: Ignore Top 50px (Header) and Bottom 50px (Footer)
-                 // item.transform[5] is the Y coordinate (0 at bottom)
-                 const filteredItems = txt.items.filter(item => {
-                   const y = item.transform[5];
-                   return y > 50 && y < (vp.height - 50);
-                 });
-
-                 const str = filteredItems.map(x=>x.str).join(' ');
-                 // Run Advanced Heuristic Cleaner (Ligatures, Paragraphs)
-                 textArr.push(str.length > 5 ? cleanText(str) : ""); 
+                 const str = await extractTextFromSVG(pdf, i);
+                 textArr.push(cleanText(str)); 
                }
 
                let toc = []; try { const outline = await pdf.getOutline(); if(outline) toc = await processOutline(pdf, outline); } catch(e) {}
@@ -254,7 +296,6 @@
           const addToQueue = (newFiles) => { if (newFiles.length === 0) return; setQueue(prev => [...prev, ...newFiles]); };
           const handleFileSelect = (e) => { if (!window.pdfjsLib) return alert("Engine loading..."); const newFiles = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf')); addToQueue(newFiles); };
           
-          // --- NEW FEATURE: BATCH POLISH (MAGIC WAND) ---
           const batchPolish = async () => {
              if (!apiKey) return alert("API Key Required");
              if (selectedIds.size === 0) return alert("Select files to polish");
@@ -267,7 +308,6 @@
                 try {
                    setStatusMsg(`Polishing: ${file.name}...`);
                    const cleanPages = await cleanTextBatch(file.textContent, apiKey);
-                   // Safety Check
                    if (cleanPages.length === file.textContent.length) {
                       file.textContent = cleanPages;
                       await new Promise(r => store.put(file).onsuccess = r);
@@ -293,94 +333,104 @@
                 setStatusMsg("Merged & Queued!");
              } catch(err) { alert("Merge Failed: " + err.message); setStatusMsg(""); }
           };
+          useEffect(() => {
+            const script = document.createElement('script'); script.src = PDFJS_CDN; script.onload = () => window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN; document.body.appendChild(script);
+            if('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js');
+            window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); setDeferredPrompt(e); });
+            loadLibrary();
+            try { const saved = localStorage.getItem('docusearch_keywords_v2'); if(saved) { const parsed = JSON.parse(saved); if (Array.isArray(parsed)) setSavedSearches(parsed); } } catch(e) {}
+            document.getElementById('emergency-controls').style.display = 'none';
+          }, []);
 
-          // VIEW LOGIC
-          const handleView = (f) => { if(selectionMode) toggleSelection(f.id); else { setSelectedFile({...f, page:1}); setIsViewerOpen(true); setShowToC(false); setIsEditingText(false); } };
-          const toggleSelection = (id) => { const s = new Set(selectedIds); if(s.has(id)) s.delete(id); else s.add(id); setSelectedIds(s); };
-          const selectAll = () => { if(selectedIds.size===files.length) setSelectedIds(new Set()); else setSelectedIds(new Set(files.map(f=>f.id))); };
-          const bulkTag = () => { const tag = prompt("Enter tag:"); if(!tag) return; selectedIds.forEach(id => updateFileInDB(id, { tags: [] }, (old) => { const nt = [...new Set([...(old.tags||[]), tag])]; updateFileInDB(id, { tags: nt }, (n) => setFiles(p => p.map(f => f.id === id ? n : f))); })); setSelectionMode(false); setSelectedIds(new Set()); };
+          const updateApiKey = (k) => { setApiKey(k); localStorage.setItem('gemini_api_key', k); };
+          const loadLibrary = async () => { const db = await openDB(); const tx = db.transaction(STORE_NAME, 'readonly'); const req = tx.objectStore(STORE_NAME).getAll(); req.onsuccess = () => setFiles(req.result.sort((a,b) => b.added - a.added)); };
+          const installApp = async () => { if (deferredPrompt) { deferredPrompt.prompt(); const { outcome } = await deferredPrompt.userChoice; if (outcome === 'accepted') setDeferredPrompt(null); }};
 
-          const exportForGem = async () => {
-             if(selectedIds.size === 0) return alert("Select files first!");
-             setStatusMsg("Forging Gem Knowledge Base...");
-             const db = await openDB(); const store = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME);
-             let md = "# Gem Knowledge Base\n\n> Generated by DocuSearch\n\n## Table of Contents\n";
-             let contentBody = "";
-             let count = 0;
-             for(const id of selectedIds) {
-                await new Promise(resolve => { store.get(id).onsuccess = (e) => { const f = e.target.result; const safeName = f.name.replace(/\[|\]/g, ''); md += `- [${safeName}](#${safeName.replace(/\s/g,'-').toLowerCase()})\n`; contentBody += `\n---\n\n# ${f.name}\n**Tags:** ${f.tags.join(', ')}\n**Pages:** ${f.pageCount}\n\n`; f.textContent.forEach((pageText, idx) => { if(pageText) contentBody += `### Page ${idx+1}\n${pageText}\n\n`; }); count++; resolve(); }; });
+          // --- KEYWORD LOGIC ---
+          const saveKeyword = (obj) => { const newK = savedSearches.some(k=>k.id===obj.id) ? savedSearches.map(k=>k.id===obj.id?obj:k) : [...savedSearches, obj]; setSavedSearches(newK); localStorage.setItem('docusearch_keywords_v2', JSON.stringify(newK)); };
+          const deleteKeyword = (id) => { const newK = savedSearches.filter(k=>k.id!==id); setSavedSearches(newK); localStorage.setItem('docusearch_keywords_v2', JSON.stringify(newK)); };
+          const toggleQuickSave = (term) => { if(!term.trim()) return; const exists = savedSearches.find(s => s.term.toLowerCase() === term.toLowerCase()); if (exists) deleteKeyword(exists.id); else saveKeyword({ id: Math.random().toString(36).substr(2,9), term, category: 'General', important: false }); };
+
+          // QUEUE PROCESSOR
+          useEffect(() => { if (queue.length > 0 && !isProcessing) processNextBatch(); }, [queue, isProcessing]);
+          const processNextBatch = async () => {
+            setIsProcessing(true);
+            const batch = queue.slice(0, BATCH_SIZE);
+            for (const file of batch) await processFile(file, queue.length);
+            setQueue(prev => prev.slice(BATCH_SIZE));
+            if (queue.length <= BATCH_SIZE) { setStatusMsg("Import Complete!"); setTimeout(()=>setStatusMsg(''), 2000); }
+            setIsProcessing(false);
+          };
+
+          const processFile = async (file, remaining) => {
+            try {
+               const id = `${file.name}-${file.size}`; if(files.some(f=>f.id===id)) return;
+               setStatusMsg(`Smart Scan: ${file.name} (${remaining})`);
+               const url = URL.createObjectURL(file);
+               const task = window.pdfjsLib.getDocument(url);
+               const pdf = await task.promise;
+               
+               // 1. ACTIVATE LAYER SCALPEL (Removes Shadow Text)
+               await disableShadowLayers(pdf);
+               
+               let thumb = null;
+               try { const p1 = await pdf.getPage(1); const vp = p1.getViewport({scale:0.5}); const cvs = document.createElement('canvas'); cvs.width=vp.width; cvs.height=vp.height; await p1.render({canvasContext:cvs.getContext('2d'), viewport:vp}).promise; thumb=cvs.toDataURL('image/jpeg',0.6); } catch(e){}
+
+               // 2. ACTIVATE SVG EXTRACTION (Fixes Layouts)
+               const textArr = [];
+               for(let i=1; i<=pdf.numPages; i++){
+                 const str = await extractTextFromSVG(pdf, i);
+                 textArr.push(cleanText(str)); 
+               }
+
+               let toc = []; try { const outline = await pdf.getOutline(); if(outline) toc = await processOutline(pdf, outline); } catch(e) {}
+               const data = { id, name: file.name, pageCount: pdf.numPages, textContent: textArr, thumbnail: thumb, tags: [], toc: toc, added: Date.now() };
+               await saveFileToDB(data);
+               setFiles(p => [data, ...p]);
+               URL.revokeObjectURL(url);
+            } catch(e) { console.error(e); }
+          };
+
+          const addToQueue = (newFiles) => { if (newFiles.length === 0) return; setQueue(prev => [...prev, ...newFiles]); };
+          const handleFileSelect = (e) => { if (!window.pdfjsLib) return alert("Engine loading..."); const newFiles = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf')); addToQueue(newFiles); };
+          
+          const batchPolish = async () => {
+             if (!apiKey) return alert("API Key Required");
+             if (selectedIds.size === 0) return alert("Select files to polish");
+             setStatusMsg("Polishing Text...");
+             const db = await openDB();
+             for (const id of selectedIds) {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                const store = tx.objectStore(STORE_NAME);
+                const file = await new Promise(r => store.get(id).onsuccess = e => r(e.target.result));
+                try {
+                   setStatusMsg(`Polishing: ${file.name}...`);
+                   const cleanPages = await cleanTextBatch(file.textContent, apiKey);
+                   if (cleanPages.length === file.textContent.length) {
+                      file.textContent = cleanPages;
+                      await new Promise(r => store.put(file).onsuccess = r);
+                   } else { console.warn("Page mismatch, skipping save."); }
+                } catch(err) { console.error(err); }
              }
-             md += "\n" + contentBody;
-             const blob = new Blob([md], {type: "text/markdown"}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `Gem_KB_${new Date().toISOString().slice(0,10)}.md`; a.click();
-             setStatusMsg(`Exported ${count} files!`); setSelectionMode(false); setSelectedIds(new Set());
+             setStatusMsg("Polish Complete!");
+             setSelectionMode(false); setSelectedIds(new Set()); loadLibrary();
           };
 
-          const handleScanRequest = () => { if(selectedFile) setShowReuploadModal(true); };
-          const runAIRepair = async () => { if(!selectedFile) return; if(!apiKey) { alert("Add API Key in Settings first!"); return setShowSettings(true); } document.getElementById('reupload-ai').click(); };
-          const handleReuploadAI = async (e) => {
-             const f = e.target.files[0]; if(!f || f.name !== selectedFile.name) return alert("Filename mismatch.");
-             setStatusMsg("Sending to Gemini 2.5...");
+          const handleMergeSelect = async (e) => {
+             const mergeFiles = Array.from(e.target.files);
+             if (mergeFiles.length < 2) return alert("Select at least 2 PDFs.");
+             setStatusMsg("Merging...");
              try {
-                const url = URL.createObjectURL(f); const task = window.pdfjsLib.getDocument(url); const pdf = await task.promise; const page = await pdf.getPage(selectedFile.page||1); const vp = page.getViewport({scale:2}); const cvs = document.createElement('canvas'); cvs.width=vp.width; cvs.height=vp.height; await page.render({canvasContext:cvs.getContext('2d'), viewport:vp}).promise;
-                const md = await callGemini(cvs.toDataURL('image/jpeg', 0.7), apiKey);
-                const newC = [...selectedFile.textContent]; newC[(selectedFile.page||1)-1] = md;
-                updateFileInDB(selectedFile.id, { textContent: newC }, (n) => setSelectedFile({...selectedFile, textContent: n.textContent}));
-                setStatusMsg("Page Upgraded!");
-             } catch(err) { alert(err.message); setStatusMsg(""); }
+                const mergedPdf = await PDFLib.PDFDocument.create();
+                for (const file of mergeFiles) { const arrayBuffer = await file.arrayBuffer(); const pdf = await PDFLib.PDFDocument.load(arrayBuffer); const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices()); copiedPages.forEach((page) => mergedPdf.addPage(page)); }
+                const mergedBytes = await mergedPdf.save();
+                const blob = new Blob([mergedBytes], { type: 'application/pdf' });
+                const fileObj = new File([blob], `Merged_${new Date().toISOString().slice(0,10)}.pdf`, { type: 'application/pdf' });
+                addToQueue([fileObj]);
+                const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = fileObj.name; link.click();
+                setStatusMsg("Merged & Queued!");
+             } catch(err) { alert("Merge Failed: " + err.message); setStatusMsg(""); }
           };
-          const handleKeywordClick = (keyword) => { setIsViewerOpen(false); setSearchQuery(keyword); };
-          const enableEditMode = () => { const txt = selectedFile?.textContent?.[(selectedFile?.page||1)-1] || ""; setEditedTextContent(txt); setIsEditingText(true); };
-          const saveEditedText = () => { if(!selectedFile) return; const pageIdx = (selectedFile.page || 1) - 1; const newContent = [...selectedFile.textContent]; newContent[pageIdx] = editedTextContent; updateFileInDB(selectedFile.id, { textContent: newContent }, (newS) => setSelectedFile({...selectedFile, textContent: newS.textContent})); setIsEditingText(false); };
-          const speakText = () => { if(isSpeaking) { window.speechSynthesis.cancel(); setIsSpeaking(false); return; } if(!selectedFile) return; const txt = selectedFile.textContent[(selectedFile.page||1)-1]; if(!txt || txt==="[Image]") return alert("No text."); const u = new SpeechSynthesisUtterance(txt); u.onend = () => setIsSpeaking(false); setIsSpeaking(true); window.speechSynthesis.speak(u); };
-          useEffect(() => { return () => window.speechSynthesis.cancel(); }, [selectedFile]);
-          const exportData = () => { openDB().then(db => { db.transaction(STORE_NAME,'readonly').objectStore(STORE_NAME).getAll().onsuccess = (e) => { const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(e.target.result)); a.download = "docusearch_master_backup.json"; a.click(); }; }); };
-          const importData = (e) => { const f = e.target.files[0]; if(!f) return; const r = new FileReader(); r.onload = async (ev) => { try { const d = JSON.parse(ev.target.result); const db=await openDB(); const tx=db.transaction(STORE_NAME,'readwrite'); d.forEach(i=>tx.objectStore(STORE_NAME).put(i)); location.reload(); } catch(err){ alert("Error importing"); }}; r.readAsText(f); };
-
-          useEffect(() => { if(!searchQuery) { setSearchResults([]); return; } const fuse = new Fuse(files, { keys: ['name', 'textContent', 'tags'], threshold: 0.3 }); setSearchResults(fuse.search(searchQuery).map(r => r.item)); }, [searchQuery, files]);
-          const filteredFiles = files.filter(f => activeTagFilter ? f.tags?.includes(activeTagFilter) : true);
-          const allTags = [...new Set(files.flatMap(f => f.tags || []))];
-          const visibleTags = allTags.filter(t => t.toLowerCase().includes(tagQuery.toLowerCase())).sort();
-          const groupedKeywords = useMemo(() => { const groups = {}; groups['Priority'] = savedSearches.filter(s => s.important); savedSearches.forEach(s => { if (s.important) return; const cat = s.category || 'General'; if (!groups[cat]) groups[cat] = []; groups[cat].push(s); }); return groups; }, [savedSearches]);
-
-          return (
-            <div className="flex flex-col h-[100dvh] bg-slate-950 text-slate-200 overflow-hidden font-sans">
-              {/* HEADER */}
-              <div className="pt-safe-top bg-slate-900 border-b border-slate-800 pb-2 px-4 flex items-end justify-between shadow-sm z-20">
-                 <div className="flex items-center gap-2 mt-3">
-                    <div className="bg-indigo-600 p-1.5 rounded-lg text-white cursor-pointer" onClick={()=>setShowSettings(!showSettings)}><Icon path={ICONS.settings} size={20}/></div>
-                    <h1 className="font-bold text-lg leading-none text-white">Gem <span className="text-indigo-400">Forge</span></h1>
-                 </div>
-                 <div className="flex gap-2">
-                    <button onClick={() => setShowSavedSearches(!showSavedSearches)} className={`p-1 ${showSavedSearches ? 'text-indigo-400' : 'text-slate-400'}`}><Icon path={ICONS.listIcon} size={22} /></button>
-                    <button onClick={()=>{setSelectionMode(!selectionMode); setSelectedIds(new Set());}} className={`p-2 rounded-lg text-xs font-bold flex items-center gap-1 ${selectionMode?'bg-amber-900/50 text-amber-400 border border-amber-700':'bg-slate-800 text-slate-400'}`}>
-                       <Icon path={ICONS.select} size={14}/> {selectionMode ? 'Done' : 'Select'}
-                    </button>
-                 </div>
-              </div>
-
-              {/* SETTINGS */}
-              {showSettings && (
-                <div className="bg-slate-900 text-slate-200 p-4 space-y-4 absolute top-16 left-0 right-0 z-40 shadow-xl border-b border-slate-800 animate-in slide-in-from-top-5">
-                   <div className="bg-slate-800 p-3 rounded-xl border border-slate-700">
-                      <label className="text-xs font-bold text-slate-500 uppercase mb-1">Gemini API Key (v2.5)</label>
-                      <input type="password" value={apiKey} onChange={e=>updateApiKey(e.target.value)} placeholder="Paste key..." className="w-full bg-slate-900 p-2 rounded border border-slate-600 text-sm" />
-                   </div>
-                   {selectionMode && selectedIds.size > 0 && (
-                      <div className="grid grid-cols-2 gap-2">
-                         <button onClick={bulkTag} className="p-3 bg-indigo-600 rounded-lg font-bold text-white">Tag ({selectedIds.size})</button>
-                         <button onClick={exportForGem} className="p-3 bg-amber-600 rounded-lg font-bold text-white flex justify-center gap-2"><Icon path={ICONS.gem} /> Export Gem</button>
-                         {/* MAGIC WAND BUTTON */}
-                         <button onClick={batchPolish} className="col-span-2 p-3 bg-fuchsia-600 rounded-lg font-bold text-white flex justify-center gap-2 border border-fuchsia-400/50"><Icon path={ICONS.wand} /> AI Batch Polish</button>
-                      </div>
-                   )}
-                   {deferredPrompt && <button onClick={installApp} className="flex items-center gap-2 w-full p-3 bg-indigo-600 rounded-lg font-bold shadow-lg text-white"><Icon path={ICONS.download} /> Install App</button>}
-                   <button onClick={exportData} className="flex items-center gap-2 w-full p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700"><Icon path={ICONS.download} /> Backup Library</button>
-                   <button onClick={() => importInputRef.current.click()} className="flex items-center gap-2 w-full p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700"><Icon path={ICONS.upload} /> Restore Library</button>
-                   <button onClick={() => { if(confirm("Reset?")) { indexedDB.deleteDatabase(DB_NAME); location.reload(); }}} className="flex items-center gap-2 w-full p-3 bg-red-900/20 text-red-400 border border-red-900/50 rounded-lg"><Icon path={ICONS.trash} /> Factory Reset</button>
-                   <input type="file" ref={importInputRef} className="hidden" onChange={importData} accept=".json" />
-                </div>
-              )}
-              
               {/* KNOWLEDGE GRAPH DRAWER */}
               {showSavedSearches && ( <div className="absolute inset-x-0 top-[4rem] bg-slate-900 border-b border-slate-800 shadow-xl z-30 max-h-[60vh] overflow-y-auto animate-in slide-in-from-top-2 flex flex-col"> <div className="p-3 border-b border-slate-800 bg-slate-900 flex justify-between items-center sticky top-0 z-10"> <h3 className="text-xs font-bold text-slate-500 uppercase">Knowledge Graph</h3> <button onClick={() => setIsEditingKeywords(!isEditingKeywords)} className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1 ${isEditingKeywords ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}><Icon path={ICONS.edit} size={12} /> Manage</button> </div> <div className="p-4 space-y-4"> {savedSearches.length === 0 && <p className="text-sm text-slate-500 italic text-center">Star a search term to add it here.</p>} {Object.entries(groupedKeywords).map(([category, items]) => ( items.length > 0 && ( <div key={category}> <h4 className="text-[10px] font-bold text-slate-600 uppercase mb-2 tracking-wider">{category}</h4> <div className="flex flex-wrap gap-2"> {items.map(k => ( <button key={k.id} onClick={() => { if(isEditingKeywords) { setKeywordToEdit(k); } else { setSearchQuery(k.term); setShowSavedSearches(false); }}} className={`flex items-center gap-1 px-3 py-1.5 border rounded-full text-sm font-medium shadow-sm transition-all ${k.important ? 'bg-amber-900/30 border-amber-700/50 text-amber-400' : 'bg-slate-800 border-slate-700 text-slate-300'} ${isEditingKeywords ? 'hover:bg-indigo-900/30 hover:border-indigo-500' : 'active:scale-95'}`}> {k.important && <Icon path={ICONS.starFilled} size={10} className="text-amber-400" />} {k.term} {isEditingKeywords && <Icon path={ICONS.edit} size={10} className="ml-1 opacity-50" />} </button> ))} </div> </div> ) ))} </div> </div> )}
               
