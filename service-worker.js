@@ -1,4 +1,4 @@
-const CACHE_NAME = 'docusearch-v33.1'; 
+const CACHE_NAME = 'docusearch-v33.2'; 
 const ASSETS = [
   './',
   './index.html',
