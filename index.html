@@ -403,6 +403,8 @@
                 addToQueue([fileObj]);
                 const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = fileObj.name; link.click();
                 setStatusMsg("Done!");
+                   };
+               
                   const handleMergeSelect = async (e) => {
              const mergeFiles = Array.from(e.target.files);
              if (mergeFiles.length < 2) return alert("Select at least 2 PDFs.");
