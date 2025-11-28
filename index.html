@@ -335,14 +335,12 @@
              setStatusMsg("Polish Complete!");
              setSelectionMode(false); setSelectedIds(new Set()); loadLibrary();
           };
-               
+          
                const handleMergeSelect = async (e) => {
              const mergeFiles = Array.from(e.target.files);
              if (mergeFiles.length < 2) return alert("Select at least 2 PDFs.");
              
-             // Check if we should use compression mode at all
-             const useCompression = confirm("Enable Compression & B/W?\n\nOK = Yes (Compress new files, skip 'compressed' ones)\nCancel = No (Standard Fast Merge for all)");
-
+             const useCompression = confirm("Enable Compression & B/W?\n\nOK = Yes (Compress new files)\nCancel = No (Fast Merge)");
              setStatusMsg(useCompression ? "Initializing Smart Engine..." : "Merging...");
              
              try {
@@ -350,18 +348,24 @@
                 
                 for (let fIdx = 0; fIdx < mergeFiles.length; fIdx++) {
                     const file = mergeFiles[fIdx];
-                    
-                    // SMART CHECK: Is it already compressed?
-                    // If user said "No" to compression, OR if the file is already marked 'compressed', we skip the heavy work.
+                    let processed = false;
+
+                    // STRATEGY A: FAST COPY (Preserved)
                     if (!useCompression || file.name.toLowerCase().includes('compressed')) {
-                        setStatusMsg(`Fast Copy: ${file.name} (${fIdx+1}/${mergeFiles.length})`);
-                        const arrayBuffer = await file.arrayBuffer();
-                        const srcPdf = await PDFLib.PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-                        const copiedPages = await newPdf.copyPages(srcPdf, srcPdf.getPageIndices());
-                        copiedPages.forEach((page) => newPdf.addPage(page));
+                        try {
+                            setStatusMsg(`Fast Copy: ${file.name} (${fIdx+1}/${mergeFiles.length})`);
+                            const arrayBuffer = await file.arrayBuffer();
+                            const srcPdf = await PDFLib.PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+                            const copiedPages = await newPdf.copyPages(srcPdf, srcPdf.getPageIndices());
+                            copiedPages.forEach((page) => newPdf.addPage(page));
+                            processed = true;
+                        } catch (copyErr) {
+                            console.warn("Fast Copy failed, switching to Heavy Render:", copyErr);
+                        }
                     } 
-                    else {
-                        // HEAVY ROUTINE: Render -> Grayscale -> Compress -> Embed
+                    
+                    // STRATEGY B: HEAVY RENDER (With Memory Cleanup)
+                    if (!processed) {
                         const url = URL.createObjectURL(file);
                         const loadingTask = window.pdfjsLib.getDocument(url);
                         const pdf = await loadingTask.promise;
@@ -371,14 +375,21 @@
                             
                             const page = await pdf.getPage(i);
                             const viewport = page.getViewport({ scale: 1.5 });
-                            const canvas = document.createElement('canvas');
-                            canvas.width = viewport.width;
-                            canvas.height = viewport.height;
+                            
+                            // Dimensions (Integer fixed)
+                            const width = Math.floor(viewport.width);
+                            const height = Math.floor(viewport.height);
+
+                            let canvas = document.createElement('canvas');
+                            canvas.width = width;
+                            canvas.height = height;
                             const ctx = canvas.getContext('2d');
                             
-                            // Render & Grayscale
+                            // 1. Render
                             await page.render({ canvasContext: ctx, viewport }).promise;
-                            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                            
+                            // 2. Grayscale
+                            const imgData = ctx.getImageData(0, 0, width, height);
                             const d = imgData.data;
                             for (let p = 0; p < d.length; p += 4) {
                                 const gray = (0.299 * d[p]) + (0.587 * d[p+1]) + (0.114 * d[p+2]);
@@ -386,12 +397,25 @@
                             }
                             ctx.putImageData(imgData, 0, 0);
                             
-                            // Embed as JPEG (50% Quality)
+                            // 3. Compress (0.4) & Embed
                             const jpgUrl = canvas.toDataURL('image/jpeg', 0.4);
                             const jpgImageBytes = await fetch(jpgUrl).then(res => res.arrayBuffer());
                             const embeddedImg = await newPdf.embedJpg(jpgImageBytes);
-                            const newPage = newPdf.addPage([viewport.width, viewport.height]);
-                            newPage.drawImage(embeddedImg, { x: 0, y: 0, width: viewport.width, height: viewport.height });
+                            
+                            // 4. Add Page
+                            const newPage = newPdf.addPage([width, height]);
+                            newPage.drawImage(embeddedImg, { x: 0, y: 0, width: width, height: height });
+
+                            // MEMORY CLEANUP
+                            ctx.clearRect(0, 0, width, height);
+                            canvas.width = 1; canvas.height = 1; canvas = null;
+                            page.cleanup(); 
+                        }
+                        
+                        // FILE CLEANUP
+                        if (pdf) {
+                            await pdf.cleanup();
+                            pdf.destroy(); 
                         }
                         URL.revokeObjectURL(url);
                     }
@@ -400,7 +424,6 @@
                 setStatusMsg("Saving PDF...");
                 const pdfBytes = await newPdf.save();
                 const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-                // We mark the output as 'Compressed' so it gets skipped next time!
                 const fileObj = new File([blob], `Compressed_Merge_${new Date().toISOString().slice(0,10)}.pdf`, { type: 'application/pdf' });
                 
                 addToQueue([fileObj]);
@@ -412,8 +435,8 @@
                  alert("Merge Error: " + err.message); 
                  setStatusMsg("Error"); 
              }
-          };
-        
+          }; 
+  
           // VIEW LOGIC
           const handleView = (f) => { if(selectionMode) toggleSelection(f.id); else { setSelectedFile({...f, page:1}); setIsViewerOpen(true); setShowToC(false); setIsEditingText(false); } };
           const toggleSelection = (id) => { const s = new Set(selectedIds); if(s.has(id)) s.delete(id); else s.add(id); setSelectedIds(s); };
